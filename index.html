@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0e1020" />
+<meta name="description" content="Bearing Board — a travel-board dice race of wood, leather, and brass. Roll, hit exposed markers, and bear everything off first." />
+<title>Bearing Board</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<link rel="icon" type="image/png" href="icon.png" />
+<link rel="stylesheet" href="css/main.css" />
+</head>
+<body>
+<div id="bb-root">
+  <canvas id="bb-canvas" aria-hidden="true"></canvas>
+  <div id="bb-webgl-fallback" class="bb-fallback" hidden>
+    <h1>Bearing Board</h1>
+    <p>This game needs WebGL to draw the board, and your browser could not provide it.
+    Your progress and settings are safe; try a recent desktop or mobile browser.</p>
+  </div>
+
+  <div id="bb-ui">
+    <!-- HUD -->
+    <header id="bb-hud-top" class="bb-hud" hidden>
+      <div id="bb-objective" class="bb-objective" role="status"></div>
+      <div id="bb-turn-indicator" class="bb-turn" role="status"></div>
+      <button id="bb-btn-pause" class="bb-btn bb-btn-icon" type="button" aria-label="Pause game">II</button>
+    </header>
+
+    <aside id="bb-rail-left" class="bb-rail bb-rail-left" hidden aria-label="Objective and progress">
+      <h2 class="bb-rail-title">Objective</h2>
+      <div id="bb-rail-objective"></div>
+      <h2 class="bb-rail-title">Progress</h2>
+      <div id="bb-rail-progress"></div>
+    </aside>
+
+    <aside id="bb-rail-right" class="bb-rail bb-rail-right" hidden aria-label="Status and actions">
+      <h2 class="bb-rail-title">Table</h2>
+      <div id="bb-rail-status"></div>
+      <div id="bb-dice-tray" class="bb-dice-tray" aria-label="Dice"></div>
+      <div id="bb-rail-players"></div>
+    </aside>
+
+    <div id="bb-action-tray" class="bb-tray" hidden role="toolbar" aria-label="Actions">
+      <button id="bb-btn-roll" class="bb-btn bb-btn-primary" type="button">Roll</button>
+      <button id="bb-btn-double" class="bb-btn" type="button">Offer Stakes</button>
+      <button id="bb-btn-pass" class="bb-btn" type="button">Pass</button>
+      <button id="bb-btn-undo" class="bb-btn" type="button">Undo</button>
+      <button id="bb-btn-hint" class="bb-btn" type="button">Hint</button>
+      <button id="bb-btn-skip" class="bb-btn" type="button">Skip Anim</button>
+    </div>
+
+    <div id="bb-tutorial-card" class="bb-tutorial" hidden role="note">
+      <p id="bb-tutorial-text"></p>
+      <button id="bb-btn-lesson-done" class="bb-btn" type="button">Finish lesson</button>
+    </div>
+
+    <div id="bb-cube-overlay" class="bb-modal" hidden role="dialog" aria-modal="true" aria-labelledby="bb-cube-title">
+      <div class="bb-card">
+        <h2 id="bb-cube-title">Stakes offered</h2>
+        <p id="bb-cube-text"></p>
+        <div class="bb-row">
+          <button id="bb-btn-accept" class="bb-btn bb-btn-primary" type="button">Accept</button>
+          <button id="bb-btn-decline" class="bb-btn bb-btn-danger" type="button">Decline</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="bb-pause-overlay" class="bb-modal" hidden role="dialog" aria-modal="true" aria-labelledby="bb-pause-title">
+      <div class="bb-card">
+        <h2 id="bb-pause-title">Paused</h2>
+        <div class="bb-col">
+          <button id="bb-btn-resume" class="bb-btn bb-btn-primary" type="button">Resume</button>
+          <button id="bb-btn-pause-settings" class="bb-btn" type="button">Settings</button>
+          <button id="bb-btn-pause-help" class="bb-btn" type="button">Help</button>
+          <button id="bb-btn-leave" class="bb-btn bb-btn-danger" type="button">Leave table</button>
+        </div>
+      </div>
+    </div>
+
+    <main id="bb-screen" class="bb-screen" tabindex="-1"></main>
+
+    <!-- Screen-reader board mirror: a concise navigable model of the 3D board -->
+    <div id="bb-board-mirror" class="bb-sr-only" aria-label="Board state"></div>
+    <div id="bb-live" class="bb-sr-only" aria-live="polite" role="status"></div>
+    <div id="bb-live-assertive" class="bb-sr-only" aria-live="assertive" role="alert"></div>
+    <div id="bb-toast" class="bb-toast" hidden></div>
+  </div>
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

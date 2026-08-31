@@ -1,0 +1,98 @@
+[
+  {
+    "name": "ui-ack",
+    "seconds": 1,
+    "prompt": "A short soft wooden toggle click, like a small brass latch snapping shut on a travel game box, dry and close.",
+    "event": "ack"
+  },
+  {
+    "name": "dice-roll",
+    "seconds": 2,
+    "prompt": "Two small wooden dice rattling in a leather cup then tumbling across a wooden board, settling with light clicks.",
+    "event": "roll"
+  },
+  {
+    "name": "checker-move",
+    "seconds": 1,
+    "prompt": "A single polished wooden checker sliding a short distance across a varnished wooden board and stopping with a soft tap.",
+    "event": "move"
+  },
+  {
+    "name": "checker-hit",
+    "seconds": 1,
+    "prompt": "A wooden checker striking another wooden checker with a sharp knock, the struck piece sliding off onto leather.",
+    "event": "hit"
+  },
+  {
+    "name": "bear-off",
+    "seconds": 1,
+    "prompt": "A wooden checker lifted off a board and dropped into a small wooden tray, a gentle double knock.",
+    "event": "bearOff"
+  },
+  {
+    "name": "rail-enter",
+    "seconds": 1,
+    "prompt": "A wooden checker taken from a leather rail and placed firmly onto a wooden point, one solid placement thud.",
+    "event": "enter"
+  },
+  {
+    "name": "stakes-offer",
+    "seconds": 1,
+    "prompt": "A small brass doubling cube lifted and set down firmly on wood with a metallic-edged clunk, a deliberate offer.",
+    "event": "double"
+  },
+  {
+    "name": "stakes-accept",
+    "seconds": 1,
+    "prompt": "A brass cube picked up with a light metallic ring and pocketed, an agreeable bright chime-like acceptance.",
+    "event": "accept"
+  },
+  {
+    "name": "stakes-decline",
+    "seconds": 1,
+    "prompt": "A brass cube pushed back across wood with a low dull scrape and a muted thud, a firm refusal.",
+    "event": "decline"
+  },
+  {
+    "name": "invalid-move",
+    "seconds": 1,
+    "prompt": "A dull muted double knock of knuckles on wood, a low disapproving buzz-like thump, clearly negative.",
+    "event": "invalid"
+  },
+  {
+    "name": "no-moves",
+    "seconds": 1,
+    "prompt": "A soft resigned sigh of brushed leather and a single low wooden tap, conveying a skipped turn.",
+    "event": "noMoves"
+  },
+  {
+    "name": "turn-change",
+    "seconds": 1,
+    "prompt": "A quiet wooden tick, like a small marker being flipped on a board, subtle and neutral.",
+    "event": "turn"
+  },
+  {
+    "name": "game-win",
+    "seconds": 3,
+    "prompt": "A short celebratory fanfare of small brass bells and a wooden mallet roll, warm rising victorious flourish.",
+    "event": "win"
+  },
+  {
+    "name": "game-lose",
+    "seconds": 2,
+    "prompt": "A gentle descending phrase of muted wooden marimba notes with a soft leather thud, a calm good-natured defeat.",
+    "event": "lose"
+  },
+  {
+    "name": "unlock-chime",
+    "seconds": 2,
+    "prompt": "Three bright ascending glass-and-brass chime notes with a light shimmer, announcing a newly unlocked reward.",
+    "event": "unlock"
+  },
+  {
+    "name": "ui-tick",
+    "seconds": 1,
+    "prompt": "A very short dry wooden click, like a clockwork pawn advancing one notch, faint and precise.",
+    "event": "tick"
+  }
+]
