@@ -61,6 +61,16 @@ html, body {
   overflow: hidden;
   white-space: nowrap;
 }
+/* Children of visually-hidden regions (e.g. the screen-reader board mirror)
+   keep 1x1 layout boxes as well, so their clipped geometry never extends
+   past the viewport while remaining in the accessibility tree. */
+.bb-sr-only > * {
+  position: absolute;
+  top: 0; left: 0;
+  width: 1px; height: 1px;
+  margin: 0;
+  overflow: visible;
+}
 
 .bb-fallback {
   position: absolute; inset: 0;
