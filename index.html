@@ -24,6 +24,7 @@
     <header id="bb-hud-top" class="bb-hud" hidden>
       <div id="bb-objective" class="bb-objective" role="status"></div>
       <div id="bb-turn-indicator" class="bb-turn" role="status"></div>
+      <div id="bb-dice-tray" class="bb-dice-tray" role="group" aria-label="Dice"></div>
       <button id="bb-btn-pause" class="bb-btn bb-btn-icon" type="button" aria-label="Pause game">II</button>
     </header>
 
@@ -37,7 +38,6 @@
     <aside id="bb-rail-right" class="bb-rail bb-rail-right" hidden aria-label="Status and actions">
       <h2 class="bb-rail-title">Table</h2>
       <div id="bb-rail-status"></div>
-      <div id="bb-dice-tray" class="bb-dice-tray" aria-label="Dice"></div>
       <div id="bb-rail-players"></div>
     </aside>
 
@@ -71,6 +71,7 @@
         <h2 id="bb-pause-title">Paused</h2>
         <div class="bb-col">
           <button id="bb-btn-resume" class="bb-btn bb-btn-primary" type="button">Resume</button>
+          <button id="bb-btn-restart" class="bb-btn" type="button">Restart table</button>
           <button id="bb-btn-pause-settings" class="bb-btn" type="button">Settings</button>
           <button id="bb-btn-pause-help" class="bb-btn" type="button">Help</button>
           <button id="bb-btn-leave" class="bb-btn bb-btn-danger" type="button">Leave table</button>

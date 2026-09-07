@@ -223,7 +223,9 @@ async function handleApi(req, res, url) {
 async function serveStatic(req, res, urlPath) {
   if (urlPath === '/') urlPath = '/index.html';
   const filePath = path.normalize(path.join(ROOT, urlPath.replace(/^\/+/, '')));
-  if (!filePath.startsWith(ROOT)) {
+  // Compare on a separator boundary: a sibling directory sharing the root's
+  // name prefix must not pass as "inside the root".
+  if (filePath !== ROOT && !filePath.startsWith(ROOT + path.sep)) {
     res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end('Forbidden');
   }

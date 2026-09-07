@@ -127,12 +127,14 @@ html, body {
   right: calc(0.75rem + var(--sar));
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
+  flex-wrap: wrap;
   pointer-events: none;
 }
 .bb-hud > * { pointer-events: auto; }
 .bb-objective {
   flex: 1 1 auto;
+  min-width: 0;
   max-width: 70ch;
   background: var(--bb-panel);
   border: 1px solid var(--bb-line);
@@ -185,9 +187,22 @@ html, body {
   flex: 0 0 auto;
 }
 
-.bb-dice-tray { display: flex; gap: 0.5rem; margin: 0.5rem 0; min-height: 44px; align-items: center; }
+/* The roll lives in the top HUD so it stays visible on every viewport —
+   the side rails collapse on small screens. */
+.bb-dice-tray {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.35rem;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 0.4rem;
+  background: var(--bb-panel);
+  border: 1px solid var(--bb-line);
+  border-radius: var(--bb-radius);
+}
+.bb-dice-tray:empty { display: none; }
 .bb-die {
-  width: 44px; height: 44px;
+  width: 36px; height: 36px;
   display: grid; place-items: center;
   background: #f2ead6;
   color: #2a1c10;
@@ -405,7 +420,9 @@ html, body {
 /* Portrait mobile: hide side rails, status moves to top bar, tray is thumb zone */
 @media (max-width: 767px) {
   .bb-rail { display: none !important; }
-  .bb-objective { font-size: 0.85em; }
+  .bb-objective { font-size: 0.85em; flex-basis: 100%; }
+  .bb-die { width: 30px; height: 30px; font-size: 1.05rem; }
+  .bb-dice-tray { min-height: 34px; }
   .bb-tray { width: calc(100vw - 1rem - var(--sal) - var(--sar)); }
   .bb-tray .bb-btn { flex: 1 1 30%; padding: 0.5rem 0.4rem; }
   .bb-tutorial { bottom: calc(7.5rem + var(--sab)); }

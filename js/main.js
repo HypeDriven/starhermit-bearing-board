@@ -92,6 +92,10 @@ let settings = (() => {
   merged.volume = { ...DEFAULT_SETTINGS.volume, ...(loaded.volume || {}) };
   merged.bindings = { ...DEFAULT_SETTINGS.bindings, ...(loaded.bindings || {}) };
   merged.profile = { ...DEFAULT_SETTINGS.profile, ...(loaded.profile || {}) };
+  // Honour the OS motion preference until the player states one of their own.
+  if (loaded.reducedMotion === undefined) {
+    try { merged.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
+  }
   return merged;
 })();
 
@@ -1410,19 +1414,22 @@ function updateHUD() {
   const tray = $('#bb-dice-tray');
   tray.innerHTML = '';
   if (st.dice.length) {
-    const used = st.dice.slice();
-    for (const left of st.movesLeft) used.splice(used.indexOf(left), 1);
-    st.dice.forEach((d, i) => {
+    // Doubles grant four moves, so show four dice; a die counts as spent when
+    // it no longer appears in movesLeft.
+    const doubles = st.dice[0] === st.dice[1];
+    const faces = doubles ? [st.dice[0], st.dice[0], st.dice[0], st.dice[0]] : st.dice.slice();
+    const remaining = st.movesLeft.slice();
+    for (const d of faces) {
       const el = document.createElement('div');
-      el.className = 'bb-die' + (st.dice[0] === st.dice[1] ? ' bb-doubles' : '');
-      const isUsed = used.includes(d) && used.splice(used.indexOf(d), 1).length > 0;
-      // simpler: count remaining occurrences
-      tray.appendChild(el);
+      el.className = 'bb-die' + (doubles ? ' bb-doubles' : '');
+      const at = remaining.indexOf(d);
+      const isUsed = at < 0;
+      if (!isUsed) remaining.splice(at, 1);
       el.textContent = d;
       el.setAttribute('aria-label', `Die ${d}${isUsed ? ' (used)' : ''}`);
       if (isUsed) el.classList.add('bb-used');
-      void i;
-    });
+      tray.appendChild(el);
+    }
   } else {
     tray.innerHTML = '<span class="bb-tile-sub">No dice yet</span>';
   }
@@ -1477,8 +1484,10 @@ function updateCubeOverlay() {
     $('#bb-cube-text').textContent =
       `${seatName(st.cube.pending.by)} offers to raise the stakes to ${st.cube.pending.value}. ` +
       'Accept to play on at the higher stakes, or decline and concede the current stakes.';
+    const wasHidden = overlay.hidden;
     overlay.hidden = false;
-    $('#bb-btn-accept').focus();
+    // Only claim focus when the dialog opens, never on every state refresh.
+    if (wasHidden) $('#bb-btn-accept').focus();
   } else {
     overlay.hidden = true;
   }
@@ -1627,8 +1636,11 @@ function initPointer(canvas) {
 function initKeyboard() {
   document.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
+    // Never shadow browser/OS chords (Ctrl+R reload, Cmd+H hide, …).
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     const b = settings.bindings;
-    const key = e.key;
+    // Letter bindings are case-insensitive so Shift/Caps Lock still play.
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     const modalOpen = !$('#bb-pause-overlay').hidden || !$('#bb-cube-overlay').hidden;
 
     if (key === b.pause || (key === 'Escape' && !modalOpen)) {
@@ -1749,6 +1761,7 @@ function togglePause() {
   if (!session || session.over) return;
   if (overlay.hidden) {
     session.pause();
+    $('#bb-btn-restart').disabled = session.transport === 'hosted';
     overlay.hidden = false;
     announce('Game paused.');
     $('#bb-btn-resume').focus();
@@ -1807,6 +1820,7 @@ function starsText(n) {
 function showTitle() {
   appPhase = 'title';
   Audio.stopMusic();
+  Audio.stopAmbience();
   const snap = readJSON(STORE_SNAPSHOT, null);
   const m = masteryTitle();
   const dailyDef = Content.dailyForDate(platform.todayUTC());
@@ -2289,6 +2303,19 @@ function wireStaticControls() {
   $('#bb-btn-skip').addEventListener('click', () => { rendererApi.settle(); announce('Animations settled.'); });
   $('#bb-btn-pause').addEventListener('click', togglePause);
   $('#bb-btn-resume').addEventListener('click', togglePause);
+  $('#bb-btn-restart').addEventListener('click', () => {
+    if (!session) return;
+    if (session.transport === 'hosted') {
+      toast('Hosted tables cannot be restarted — the server owns this game.');
+      return;
+    }
+    $('#bb-pause-overlay').hidden = true;
+    session.pause();
+    session.clearPersisted();
+    funnel.track('retry', session.def.kind);
+    startGame(session.def, { humanSeats: [...session.humanSeats] });
+    toast('Table restarted.');
+  });
   $('#bb-btn-pause-settings').addEventListener('click', () => {
     $('#bb-pause-overlay').hidden = true;
     showSettings('pause');
@@ -2378,8 +2405,10 @@ async function boot() {
   initLifecycle(canvas);
   rendererApi.setTheme(settings.theme);
   rendererApi.startLoop();
-  // Platform detection must never block an offline start.
-  platform.init().finally(() => showTitle());
+  // Platform detection must never block an offline start. Once it settles the
+  // title is refreshed — but only if the player is still standing on it, so a
+  // late probe can never yank anyone out of a menu or an started table.
+  platform.init().finally(() => { if (appPhase === 'title') showTitle(); });
   showTitle();
   funnel.track('boot', BUILD_VERSION);
   // Deep links: #play jumps straight to a practice table (two actions max).
