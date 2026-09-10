@@ -20,3 +20,8 @@ Generated with MOSS-SoundEffect v2.0, 48 kHz mono Opus (96 kbps VBR, loudness-no
 | game-lose.opus | lose | A gentle descending phrase of muted wooden marimba notes with a soft leather thud, a calm good-natured defeat. |
 | unlock-chime.opus | unlock | Three bright ascending glass-and-brass chime notes with a light shimmer, announcing a newly unlocked reward. |
 | ui-tick.opus | tick | A very short dry wooden click, like a clockwork pawn advancing one notch, faint and precise. |
+| dice-doubles.opus | doubles | Two small wooden dice rattling in a leather cup, tumbling across a wooden board and landing together with a matched double click, followed by one short bright brass bell tap. |
+| marker-select.opus | select | A single polished wooden checker being lifted off a leather board surface with a soft dry peel and a faint fingernail tick, close and quiet. |
+| undo-slide.opus | undo | Two wooden checkers quickly slid backwards across a leather board in a short reverse sweep, ending with a soft double settle tap. |
+| table-open.opus | tableOpen | A leather-bound folding travel game board opened with a brass clasp click, leather creak, wooden halves laid flat with a firm thud, then a leather dice cup set down on wood. |
+| journey-stars.opus | stars | Three quick ascending wooden marimba taps followed by a small warm brass bell shimmer, a modest reward flourish for earning stars. |

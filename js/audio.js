@@ -193,6 +193,11 @@ const SFX_SAMPLES = {
   lose: 'game-lose',
   unlock: 'unlock-chime',
   tick: 'ui-tick',
+  doubles: 'dice-doubles',
+  select: 'marker-select',
+  undo: 'undo-slide',
+  tableOpen: 'table-open',
+  stars: 'journey-stars',
 };
 
 const sampleCache = new Map(); // basename -> AudioBuffer | null (failed)
@@ -259,5 +264,20 @@ export function playEvent(name, seed = 0) {
     case 'lose':     [392, 330, 262].forEach((f, i) => blip('voice', f, 0.5, 0.18, 'sine', i * 0.16)); break;
     case 'unlock':   [784, 988, 1175].forEach((f, i) => blip('voice', f, 0.4, 0.16, 'triangle', i * 0.09)); break;
     case 'tick':     blip('effects', 880, 0.05, 0.08); break;
+    case 'doubles':
+      noise('effects', 0.22, 0.30, 2400, 0.6);
+      noise('effects', 0.12, 0.22, 3600, 0.8, 0.10);
+      blip('effects', 190 * v, 0.14, 0.18, 'square', 0.16);
+      blip('effects', 1568, 0.3, 0.12, 'sine', 0.32);
+      break;
+    case 'select':   noise('effects', 0.06, 0.22, 1600, 1.4); blip('effects', 520 * v, 0.07, 0.1, 'triangle', 0.02); break;
+    case 'undo':     noise('effects', 0.12, 0.3, 700, 1.0); noise('effects', 0.1, 0.25, 900, 1.0, 0.1); blip('effects', 140 * v, 0.1, 0.16, 'triangle', 0.18); break;
+    case 'tableOpen':
+      blip('effects', 1200, 0.05, 0.14, 'square');
+      noise('effects', 0.35, 0.22, 380, 0.7, 0.08);
+      noise('effects', 0.14, 0.32, 240, 1.2, 0.45);
+      blip('effects', 110, 0.2, 0.2, 'triangle', 0.45);
+      break;
+    case 'stars':    [659, 784, 988].forEach((f, i) => blip('voice', f, 0.3, 0.14, 'triangle', i * 0.1)); blip('voice', 1568, 0.6, 0.08, 'sine', 0.32); break;
   }
 }

@@ -94,5 +94,35 @@
     "seconds": 1,
     "prompt": "A very short dry wooden click, like a clockwork pawn advancing one notch, faint and precise.",
     "event": "tick"
+  },
+  {
+    "name": "dice-doubles",
+    "seconds": 2,
+    "prompt": "Two small wooden dice rattling in a leather cup, tumbling across a wooden board and landing together with a matched double click, followed by one short bright brass bell tap.",
+    "event": "doubles"
+  },
+  {
+    "name": "marker-select",
+    "seconds": 1,
+    "prompt": "A single polished wooden checker being lifted off a leather board surface with a soft dry peel and a faint fingernail tick, close and quiet.",
+    "event": "select"
+  },
+  {
+    "name": "undo-slide",
+    "seconds": 1,
+    "prompt": "Two wooden checkers quickly slid backwards across a leather board in a short reverse sweep, ending with a soft double settle tap.",
+    "event": "undo"
+  },
+  {
+    "name": "table-open",
+    "seconds": 2,
+    "prompt": "A leather-bound folding travel game board opened with a brass clasp click, leather creak, wooden halves laid flat with a firm thud, then a leather dice cup set down on wood.",
+    "event": "tableOpen"
+  },
+  {
+    "name": "journey-stars",
+    "seconds": 2,
+    "prompt": "Three quick ascending wooden marimba taps followed by a small warm brass bell shimmer, a modest reward flourish for earning stars.",
+    "event": "stars"
   }
 ]

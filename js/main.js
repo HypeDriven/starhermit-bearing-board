@@ -1353,7 +1353,7 @@ function updateAfterStateChange() {
 function playEventSound(ev) {
   const seed = session.log.length;
   switch (ev.type) {
-    case 'roll': Audio.playEvent('roll', seed); break;
+    case 'roll': Audio.playEvent(ev.dice[0] === ev.dice[1] ? 'doubles' : 'roll', seed); break;
     case 'move': Audio.playEvent(ev.hit ? 'hit' : (ev.from === 'rail' ? 'enter' : 'move'), seed); if (ev.hit) vibrate(40); break;
     case 'hit': Audio.playEvent('hit', seed); vibrate(40); break;
     case 'bearOff': Audio.playEvent('bearOff', seed); break;
@@ -1514,7 +1514,7 @@ function selectOrigin(from) {
   const moves = Rules.legalMoves(session.state).filter((m) => m.from === from);
   if (!moves.length) return;
   selection = { from, moves };
-  Audio.playEvent('ack');
+  Audio.playEvent('select', session.log.length);
   const st = session.state;
   const originPos = from === 'rail'
     ? { x: 0, z: 0 }
@@ -1665,6 +1665,7 @@ function initKeyboard() {
       const dir = (key === b.next || key === 'ArrowDown') ? 1 : -1;
       const next = btns[(cur + dir + btns.length) % btns.length] || btns[0];
       next.focus();
+      Audio.playEvent('tick');
     } else if (key === 'Escape' && selection) {
       clearSelectionUI();
       announce('Selection cleared.');
@@ -1697,6 +1698,7 @@ function initGamepad() {
         const cur = btns.indexOf(document.activeElement);
         const dir = edge(15) ? 1 : -1;
         (btns[(cur + dir + btns.length) % btns.length] || btns[0]).focus();
+        Audio.playEvent('tick');
       }
     }
     prev = Object.fromEntries(pad.buttons.map((btn, i) => [i, btn.pressed]));
@@ -1776,7 +1778,7 @@ function togglePause() {
 function undoMove() {
   if (!session?.canUndo()) return;
   if (session.undo()) {
-    Audio.playEvent('ack');
+    Audio.playEvent('undo', session.log.length);
     updateAfterStateChange();
     announce('Undone. It is your roll again.');
     toast('Undone.');
@@ -1832,6 +1834,7 @@ function showTitle() {
 
   setScreen(`
     <div class="bb-title-block">
+      <img class="bb-key-art" src="assets/key-art.webp" alt="" width="1200" height="672" decoding="async" onerror="this.hidden=true" />
       <h1 class="bb-game-title">Bearing Board</h1>
       <p class="bb-tagline">A travel-board dice race of wood, leather, and brass.</p>
       <p class="bb-tagline">${esc(settings.profile.name)} · ${esc(m.title)} · ${m.stars}★ · ${achCount}/${Content.ACHIEVEMENTS.length} achievements</p>
@@ -2067,6 +2070,7 @@ function launchSession(s, how) {
   enterGameUI();
   rendererApi.introCamera();
   Audio.resumeAudio();
+  Audio.playEvent('tableOpen', s.cfg.seed);
   Audio.startAmbience(s.def.theme || settings.theme);
   Audio.startMusic(s.cfg.seed);
   if (s.over) {
@@ -2096,6 +2100,7 @@ function showResults() {
   const goals = rep.items.map((g) =>
     `<tr><td>${g.met ? '✓' : '✗'} ${esc(g.label)}</td><td>${g.met ? 'met' : 'missed'}</td></tr>`).join('');
   const stars = def.kind === 'journey' ? starsFor(def, rep, state, session.thinkingMs) : 0;
+  if (stars > 0) setTimeout(() => Audio.playEvent('stars', stars), settings.reducedMotion ? 300 : 900);
   const newAch = session.newAchievements || [];
 
   let nextBtn = '';
@@ -2108,6 +2113,7 @@ function showResults() {
   }
 
   setScreen(`
+    <img class="bb-result-art" src="assets/${won ? 'results-victory' : 'results-road'}.webp" alt="" width="640" height="400" decoding="async" onerror="this.hidden=true" />
     <h1 class="bb-headline">${won ? 'Victory!' : 'The road goes on'}</h1>
     <p class="bb-center bb-tagline">${esc(def.name)} · ${esc(seatName(res.winner))} wins by ${esc(res.reason)} · ${state.turnNum} turns · ${fmtClock(session.thinkingMs)} thinking</p>
     ${def.kind === 'journey' ? `<p class="bb-center bb-stars" style="font-size:1.6rem" aria-label="${stars} of 3 stars">${starsText(stars)}</p>` : ''}

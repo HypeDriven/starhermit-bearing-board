@@ -1,0 +1,26 @@
+# Bearing Board — SFX manifest (canonical). One clip per line:
+# file | event id (Audio.playEvent name, js/audio.js SFX_SAMPLES) | description of the sound | usage context
+# Clips: MOSS-SoundEffect v2.0, 48 kHz mono Opus 96 kbps VBR, loudness-normalised (-20 LUFS), 100 steps.
+# All one-shots play on the effects bus; every event also has a procedural WebAudio fallback in js/audio.js that
+# plays while the clip is still loading or if fetch/decode fails, and every cue has a text/DOM twin (never audio-only).
+ui-ack.opus | ack | Short soft wooden toggle click, a small brass latch snapping shut on a travel game box, dry and close | Every accepted command (doCommand) and every menu button press on the title screen
+dice-roll.opus | roll | Two small wooden dice rattling in a leather cup then tumbling across a wooden board, settling with light clicks | rules 'roll' event with a mixed roll (dice differ), any seat
+dice-doubles.opus | doubles | Same dice rattle and tumble, landing together with a matched double click, then one short bright brass bell tap | rules 'roll' event when both dice match (four moves granted), any seat
+checker-move.opus | move | A single polished wooden checker sliding a short distance across a varnished board and stopping with a soft tap | rules 'move' event from a point to a point without a hit
+checker-hit.opus | hit | A wooden checker striking another with a sharp knock, the struck piece sliding off onto leather | rules 'move' event with hit=true (blot sent to the rail); paired with a 40 ms haptic pulse and a particle burst
+bear-off.opus | bearOff | A wooden checker lifted off the board and dropped into a small wooden tray, a gentle double knock | rules 'bearOff' event (marker leaves the track into the off tray)
+rail-enter.opus | enter | A wooden checker taken from a leather rail and placed firmly onto a wooden point, one solid placement thud | rules 'move' event whose from is 'rail' (re-entry from the bar)
+marker-select.opus | select | A single polished wooden checker lifted off leather with a soft dry peel and a faint fingernail tick, close and quiet | selectOrigin(): the player picks an origin marker/point; legal targets light up
+undo-slide.opus | undo | Two wooden checkers slid backwards across leather in a short reverse sweep, ending with a soft double settle tap | undoMove(): the table rewinds to the previous roll checkpoint
+stakes-offer.opus | double | A small brass doubling cube lifted and set down firmly on wood with a metallic-edged clunk, a deliberate offer | rules 'double' event (stakes cube offered), either seat
+stakes-accept.opus | accept | A brass cube picked up with a light metallic ring and pocketed, an agreeable bright acceptance | rules 'accept' event (stakes doubled, cube changes owner)
+stakes-decline.opus | decline | A brass cube pushed back across wood with a low dull scrape and a muted thud, a firm refusal | rules 'decline' event (offer refused, game ends at the pre-offer stakes)
+invalid-move.opus | invalid | A dull muted double knock of knuckles on wood, low and clearly negative | Rejected command, illegal pick on the board (explainInvalid), hosted-table error
+no-moves.opus | noMoves | A soft resigned sigh of brushed leather and a single low wooden tap, a skipped turn | rules 'noMoves' event (no legal move for the remaining dice; Pass becomes the only action)
+turn-change.opus | turn | A quiet wooden tick, like a small marker flipped on a board, subtle and neutral | rules 'turn' event (seat changes after every die is spent or a pass)
+table-open.opus | tableOpen | A leather-bound folding travel board opened with a brass clasp click, leather creak, halves laid flat with a firm thud, a dice cup set down | launchSession(): a table opens (fresh, resumed, restarted or hosted), together with the camera intro
+game-win.opus | win | A short celebratory fanfare of small brass bells and a wooden mallet roll, warm rising flourish | showResults() when seat 0 (you) won; voice bus
+game-lose.opus | lose | A gentle descending phrase of muted wooden marimba notes with a soft leather thud, calm good-natured defeat | showResults() when a rival won; voice bus
+journey-stars.opus | stars | Three quick ascending wooden marimba taps then a small warm brass bell shimmer, a modest reward flourish | showResults() for a journey stage when 1-3 stars were earned (delayed 0.9 s after the win cue)
+unlock-chime.opus | unlock | Three bright ascending glass-and-brass chime notes with a light shimmer, a newly unlocked reward | unlockAchievement(): first time an achievement key is written to progress
+ui-tick.opus | tick | A very short dry wooden click, like a clockwork pawn advancing one notch, faint and precise | Keyboard arrow / gamepad D-pad roving focus moving across the board-mirror buttons during play

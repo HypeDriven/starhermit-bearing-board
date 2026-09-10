@@ -101,6 +101,7 @@ function contentType(p) {
     case '.json': return 'application/json; charset=utf-8';
     case '.svg': return 'image/svg+xml';
     case '.png': return 'image/png';
+    case '.webp': return 'image/webp';
     case '.opus': return 'audio/ogg';
     case '.txt': return 'text/plain; charset=utf-8';
     default: return 'application/octet-stream';
