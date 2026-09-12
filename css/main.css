@@ -235,6 +235,7 @@ html, body {
   left: 50%;
   bottom: calc(5.75rem + var(--sab));
   transform: translateX(-50%);
+  width: max-content;
   max-width: min(92vw, 34rem);
   background: var(--bb-panel);
   border: 1px solid var(--bb-accent);
@@ -244,7 +245,8 @@ html, body {
   align-items: center;
   gap: 0.75rem;
 }
-.bb-tutorial p { margin: 0; }
+.bb-tutorial p { margin: 0; min-width: 0; }
+.bb-tutorial .bb-btn { flex: 0 0 auto; white-space: nowrap; }
 
 /* ------------------------------------------------------------------ */
 /* Modals, toasts                                                      */
@@ -464,6 +466,14 @@ html, body {
     bottom: calc(4.5rem + var(--sab));
   }
   .bb-tray { left: auto; right: calc(12rem + var(--sar)); transform: none; }
+  /* Lesson card takes the status rail's column; the rail yields while a lesson card is visible. */
+  .bb-tutorial {
+    left: auto; right: calc(0.75rem + var(--sar)); transform: none;
+    top: calc(3.5rem + var(--sat)); bottom: calc(4.5rem + var(--sab));
+    width: 11rem; max-width: none; flex-direction: column; align-items: stretch; justify-content: center;
+    padding: 0.4rem 0.6rem; font-size: 0.9em; overflow-y: auto;
+  }
+  #bb-ui:has(#bb-tutorial-card:not([hidden])) .bb-rail-right { display: none !important; }
   .bb-tray .bb-btn { padding: 0.35rem 0.6rem; min-height: 44px; }
 }
 

@@ -847,6 +847,10 @@ function createRenderer(canvas) {
     renderer.toneMappingExposure = 1.05;
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(FRAMING.fov, 1, 0.1, 100);
+    // Render gameplay + selection layers; raycasting stays filtered to LAYER_GAME.
+    camera.layers.enable(LAYER_GAME);
+    camera.layers.enable(LAYER_SEL);
+    camera.layers.enable(LAYER_FX);
     camera.position.set(0, 12, 9);
     camera.lookAt(FRAMING.lookX, 0, FRAMING.lookZ);
 
@@ -1195,6 +1199,41 @@ function createRenderer(canvas) {
     camTween = { from: camera.position.clone(), to: target, t: 0, dur: 0.9 };
   }
 
+  // The rectangle of the canvas not covered by HUD chrome (rails, top bar,
+  // tray, tutorial card). The board is fitted into this rectangle so outer
+  // points and trays never sit beneath overlays.
+  function safeRect(w, h) {
+    const cr = canvas.getBoundingClientRect();
+    let l = 0, t = 0, r = w, b = h;
+    for (const sel of ['#bb-hud-top', '.bb-rail-left', '.bb-rail-right', '.bb-tray', '#bb-tutorial-card']) {
+      const el = document.querySelector(sel);
+      if (!el || el.hidden) continue;
+      const bb = el.getBoundingClientRect();
+      if (!bb.width || !bb.height || getComputedStyle(el).display === 'none') continue;
+      const e = { l: bb.left - cr.left, t: bb.top - cr.top, r: bb.right - cr.left, b: bb.bottom - cr.top };
+      // Each chrome element hugs one edge; carve that edge off the safe area.
+      if (e.b <= h * 0.35 && e.r - e.l > w * 0.5) t = Math.max(t, e.b);
+      else if (e.t >= h * 0.55) b = Math.min(b, e.t);
+      else if (e.r <= w * 0.4) l = Math.max(l, e.r);
+      else if (e.l >= w * 0.6) r = Math.min(r, e.l);
+      else if (e.t >= h * 0.4) b = Math.min(b, e.t);
+    }
+    if (r - l < w * 0.45) { l = 0; r = w; }
+    const pad = 6;
+    const out = { x: l + pad, y: t + pad, w: r - l - pad * 2, h: b - t - pad * 2 };
+    if (out.w < 40 || out.h < 40) return { x: 0, y: 0, w, h };
+    return out;
+  }
+
+  // Frames the board inside the safe rectangle: the camera's aspect follows
+  // the safe rect and a view offset paints the surrounding chrome area.
+  function applyFraming(w, h) {
+    const r = safeRect(w, h);
+    camera.aspect = r.w / r.h;
+    camera.setViewOffset(r.w, r.h, -r.x, -r.y, w, h);
+    camera.updateProjectionMatrix();
+  }
+
   function cameraHome() {
     const vfov = (FRAMING.fov * Math.PI) / 180;
     const aspect = camera.aspect || 1;
@@ -1202,6 +1241,9 @@ function createRenderer(canvas) {
       FRAMING.halfH / Math.tan(vfov / 2),
       FRAMING.halfW / (Math.tan(vfov / 2) * aspect),
     ) + 1.2;
+    // Fog follows the framing distance so a far camera (narrow portrait) never
+    // hides the board.
+    if (scene.fog) { scene.fog.near = dist + 7; scene.fog.far = dist + 24; }
     const tilt = (FRAMING.tiltDeg * Math.PI) / 180;
     return new THREE.Vector3(FRAMING.lookX, Math.sin(tilt) * dist, Math.cos(tilt) * dist + FRAMING.lookZ);
   }
@@ -1210,8 +1252,7 @@ function createRenderer(canvas) {
     if (!renderer) return;
     const w = canvas.clientWidth || innerWidth;
     const h = canvas.clientHeight || innerHeight;
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
+    applyFraming(w, h);
     if (!camTween) {
       camera.position.copy(cameraHome());
       camera.lookAt(FRAMING.lookX, 0, FRAMING.lookZ);
@@ -1322,10 +1363,20 @@ function createRenderer(canvas) {
   let lastT = 0;
   let running = false;
 
+  let framingKey = '', framingCheckAt = 0;
   function frame(t) {
     rafId = requestAnimationFrame(frame);
     const dt = Math.min(0.05, (t - lastT) / 1000 || 0.016);
     lastT = t;
+    // HUD chrome (rails, tray, tutorial card) appears and disappears without
+    // a window resize; re-fit the board whenever the safe rectangle changes.
+    if (t > framingCheckAt) {
+      framingCheckAt = t + 250;
+      const w = canvas.clientWidth || innerWidth, h = canvas.clientHeight || innerHeight;
+      const r = safeRect(w, h);
+      const key = [w, h, r.x | 0, r.y | 0, r.w | 0, r.h | 0].join(',');
+      if (key !== framingKey) { framingKey = key; resize(); }
+    }
     // Tweens
     if (tweens.length) {
       for (const tw of tweens) {
