@@ -220,7 +220,8 @@ Shipped language: English only (`<html lang="en">`); all strings are inline lite
 Conventions from https://wiki.starhermit.com/ used today:
 - **Manifest:** `starhermit.txt` with `name=Bearing Board`, `launch=index.html`, `owner=<uuid>`, `server=server.js`, `version=1.0.0`, `contentVersion=1`, `cover=coverart.png`.
 - **Server script:** `server.js` serves the distribution and a same-origin `/api/v1` implemented with the shared `rules.js`: `GET time` (round-trip-adjusted offset in `platform.init`, used for the daily's UTC day and countdown), `POST sessions` (validated config → authoritative table), `GET sessions/:id` (reconnect snapshot; the client shows "While you were away: N table events"), `POST sessions/:id/commands` (seat 0 only, short unique `id`, type whitelist, 8 KB body cap, 60 requests / 10 s per address, duplicate ids answered idempotently, AI seats played out server-side), `GET sessions/:id/replay` (envelope with hashes). Sessions are in-memory, capped at 500 by last touch.
-- **Not used:** platform identity/sign-in (the profile name is a local guest string), presence heartbeats, activity start/end, cloud saves (progress is a checksummed `localStorage` document), leaderboards, platform achievements (unlocks are local only), invitations, matchmaking, chat, voice, WebSocket events. The daily's `ranked: true` flag is informational; no score is submitted anywhere.
+- **Launch token** (`platform` in `js/main.js`): read from the URL fragment `#game_token=<jwt>` (optional `&session_id=`, stripped after the read; query `?token=`/`?launch_token=` kept for local dev), decoded for `sub` + `game_scope` (never hard-coded), sent as `Authorization: Bearer` on every `api/v1` call, re-minted every 45 min via `POST /api/v1/games/{slug}/launch-token` (60 s retry on failure). The profile nickname from `GET /api/v1/users/{sub}/profile` (never `/api/v1/me`, never usernames; `Player <id8>` fallback) replaces the local guest name on the title line when hosted. On the platform the game's own session routes only exist if the declared backend runs in front of them; otherwise the daily start falls back to a local table with a toast, with no console errors. No tokens are persisted.
+- **Not used:** presence heartbeats, activity start/end, cloud saves (progress is a checksummed `localStorage` document), leaderboards, platform achievements (unlocks are local only), invitations, matchmaking, chat, voice, WebSocket events. The daily's `ranked: true` flag is informational; no score is submitted anywhere.
 
 ## 13. Technical architecture
 
@@ -280,7 +281,7 @@ QA bar (checkable):
 ## Design intent not yet implemented
 
 - Localization into en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT with a string table and language selection from the platform profile/browser.
-- Platform identity, presence, activity start/end, cloud-saved progress, leaderboard submission for the daily, and platform-side achievement unlocks.
+- Platform identity beyond the title-line nickname, presence, activity start/end, cloud-saved progress, leaderboard submission for the daily, and platform-side achievement unlocks.
 - A concede control in the pause dialog.
 - Refusing `tests/`, `tools/` and dotfiles in `server.js`.
 - A rendered brass stakes cube on the board (currently a HUD badge).

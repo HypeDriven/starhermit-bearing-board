@@ -228,14 +228,69 @@ function fmtClock(ms) {
 }
 
 // ---------------------------------------------------------------------------
-// Platform: same-origin /api detection + server-time synchronization
-// (round-trip adjusted). Offline start works fully without the API.
+// Platform: launch-token read (URL fragment, stripped after the read), JWT
+// sub/game_scope decode, Bearer auth on every /api call, 45-min token
+// refresh, profile nickname for the title line, plus same-origin /api
+// detection + server-time synchronization (round-trip adjusted). Offline
+// start works fully without the API. No tokens in storage — memory only.
 // ---------------------------------------------------------------------------
 
 const platform = {
   available: false,
   timeOffsetMs: 0,
+  token: null,        // launch token, memory only
+  userId: null,       // JWT sub
+  slug: null,         // JWT game_scope
+  profileName: null,  // account nickname when hosted
+  _refreshTimer: null,
+  _retryTimer: null,
+
+  // Fragment first (the platform contract: #game_token=<jwt>[&session_id=]);
+  // query forms are kept for local development only.
+  readLaunchToken() {
+    try {
+      const h = new URLSearchParams(String(location.hash || '').replace(/^#/, ''));
+      const t = h.get('game_token');
+      if (t) {
+        h.delete('game_token');
+        h.delete('session_id');
+        const rest = h.toString();
+        history.replaceState(null, '', location.pathname + location.search + (rest ? '#' + rest : ''));
+        return t;
+      }
+      const q = new URLSearchParams(location.search);
+      return q.get('game_token') || q.get('token') || q.get('launch_token') || null;
+    } catch (_) { return null; }
+  },
+
+  decodeJwt(t) {
+    try {
+      const seg = String(t).split('.')[1];
+      if (!seg) return null;
+      let b64 = seg.replace(/-/g, '+').replace(/_/g, '/');
+      b64 += '='.repeat((4 - (b64.length % 4)) % 4);
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return JSON.parse(new TextDecoder().decode(bytes));
+    } catch (_) { return null; }
+  },
+
   async init() {
+    this.token = this.readLaunchToken();
+    if (this.token) {
+      const claims = this.decodeJwt(this.token);
+      if (!claims) this.token = null;
+      else {
+        if (typeof claims.sub === 'string' && claims.sub) this.userId = claims.sub;
+        if (typeof claims.game_scope === 'string' && claims.game_scope) this.slug = claims.game_scope;
+        if (!this.userId || !this.slug) this.token = null; // not a usable launch token
+      }
+    }
+    if (this.token) {
+      this._scheduleRefresh();
+      this._fetchProfile(); // nickname lands async; the title re-renders when it does
+    }
     try {
       const t0 = Date.now();
       const res = await fetch('api/v1/time', { cache: 'no-store' });
@@ -248,19 +303,61 @@ const platform = {
       this.available = true;
     } catch (_) { this.available = false; }
   },
+
+  // The token lives 60 min; scoped tokens may re-mint via the game's
+  // launch-token route. Retry a failed re-mint after ~60 s.
+  _scheduleRefresh() {
+    if (this._refreshTimer) clearInterval(this._refreshTimer);
+    this._refreshTimer = setInterval(() => this._refreshToken(), 45 * 60 * 1000);
+  },
+  _refreshToken() {
+    if (!this.token || !this.slug) return;
+    this.api(`games/${encodeURIComponent(this.slug)}/launch-token`, { method: 'POST', body: '{}' })
+      .then((body) => {
+        if (body && typeof body.token === 'string' && body.token) {
+          this.token = body.token;
+          const claims = this.decodeJwt(this.token);
+          if (claims && claims.sub) this.userId = claims.sub;
+          if (claims && claims.game_scope) this.slug = claims.game_scope;
+        } else {
+          this._retryRefresh();
+        }
+      })
+      .catch(() => this._retryRefresh());
+  },
+  _retryRefresh() {
+    if (this._retryTimer || !this.token) return;
+    this._retryTimer = setTimeout(() => { this._retryTimer = null; this._refreshToken(); }, 60000);
+  },
+
+  // Display name for the title line: the profile nickname is the only
+  // profile read a game-scoped token may make (never /api/v1/me, never the
+  // raw username). Falls back to a neutral shortened id.
+  async _fetchProfile() {
+    if (!this.userId) return;
+    try {
+      const r = await this.api(`users/${encodeURIComponent(this.userId)}/profile`);
+      const name = r && typeof r.nickname === 'string' && r.nickname ? r.nickname : null;
+      this.profileName = (name || ('Player ' + this.userId.slice(0, 8))).slice(0, 40);
+    } catch (_) {
+      this.profileName = 'Player ' + this.userId.slice(0, 8);
+    }
+    if (appPhase === 'title') showTitle();
+  },
+
   now() { return new Date(Date.now() + this.timeOffsetMs); },
   todayUTC() { return Content.todayUTC(this.now()); },
   async api(path, opts = {}) {
-    const res = await fetch(`api/v1/${path}`, {
-      headers: { 'Content-Type': 'application/json' },
-      ...opts,
-    });
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    const res = await fetch(`api/v1/${path}`, { ...opts, headers });
     let body = null;
     try { body = await res.json(); } catch (_) {}
     if (res.status === 429) throw new Error('The table is busy — try again in a moment.');
     if (!res.ok) throw new Error(body?.error || `Request failed (${res.status})`);
     return body;
   },
+  get tokenHosted() { return !!this.token; },
 };
 
 // ---------------------------------------------------------------------------
@@ -1837,7 +1934,7 @@ function showTitle() {
       <img class="bb-key-art" src="assets/key-art.webp" alt="" width="1200" height="672" decoding="async" onerror="this.hidden=true" />
       <h1 class="bb-game-title">Bearing Board</h1>
       <p class="bb-tagline">A travel-board dice race of wood, leather, and brass.</p>
-      <p class="bb-tagline">${esc(settings.profile.name)} · ${esc(m.title)} · ${m.stars}★ · ${achCount}/${Content.ACHIEVEMENTS.length} achievements</p>
+      <p class="bb-tagline">${esc(platform.profileName || settings.profile.name)} · ${esc(m.title)} · ${m.stars}★ · ${achCount}/${Content.ACHIEVEMENTS.length} achievements</p>
     </div>
     <nav class="bb-menu" aria-label="Main menu">
       ${snap ? `<button class="bb-btn bb-btn-primary" id="m-continue">Continue — ${esc(snap.def?.name || snap.defId || 'saved table')}</button>` : ''}
