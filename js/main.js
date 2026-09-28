@@ -15,6 +15,8 @@ import * as Rules from './rules.js';
 import * as Content from './content.js';
 import * as AI from './ai.js';
 import * as Audio from './audio.js';
+import * as Gfx from './gfx.js';
+import { gfxStrings, pickLocale } from './gfx-strings.js';
 
 const BUILD_VERSION = '1.0.0';
 const STORE_SETTINGS = 'bb.settings.v1';
@@ -70,7 +72,7 @@ function checksum(obj) {
 const DEFAULT_SETTINGS = {
   audioEnabled: true,
   volume: { music: 0.45, effects: 0.8, ambience: 0.35, voice: 0.7 },
-  quality: 'auto',            // auto | low | medium | high
+  graphics: { ...Gfx.DEFAULT_GRAPHICS }, // preset auto|low|balanced|high|ultra + per-category overrides (js/gfx.js)
   theme: 'caravan',
   reducedMotion: false,
   highContrast: false,
@@ -92,6 +94,12 @@ let settings = (() => {
   merged.volume = { ...DEFAULT_SETTINGS.volume, ...(loaded.volume || {}) };
   merged.bindings = { ...DEFAULT_SETTINGS.bindings, ...(loaded.bindings || {}) };
   merged.profile = { ...DEFAULT_SETTINGS.profile, ...(loaded.profile || {}) };
+  merged.graphics = { ...Gfx.DEFAULT_GRAPHICS, ...(loaded.graphics || {}) };
+  // Migrate the old single quality tier (auto | low | medium | high) once.
+  if (!loaded.graphics && loaded.quality && loaded.quality !== 'auto') {
+    merged.graphics.preset = loaded.quality === 'medium' ? 'balanced' : loaded.quality;
+  }
+  delete merged.quality;
   // Honour the OS motion preference until the player states one of their own.
   if (loaded.reducedMotion === undefined) {
     try { merged.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
@@ -109,14 +117,16 @@ function applySettings() {
   b.classList.toggle('bb-left-handed', !!settings.leftHanded);
   Audio.setAudioEnabled(settings.audioEnabled);
   for (const bus of ['music', 'effects', 'ambience', 'voice']) Audio.setVolume(bus, settings.volume[bus]);
-  if (rendererApi) rendererApi.setQuality(effectiveQuality());
+  if (rendererApi) rendererApi.setGraphics(settings.graphics);
 }
 
-function effectiveQuality() {
-  if (settings.quality !== 'auto') return settings.quality;
-  const coarse = matchMedia('(pointer: coarse)').matches;
-  const small = Math.min(screen.width, screen.height) < 820;
-  return coarse || small ? 'medium' : 'high';
+// Touch devices and small screens cap the Auto preset at Balanced.
+function isMobileDevice() {
+  try {
+    const coarse = matchMedia('(pointer: coarse)').matches;
+    const small = Math.min(screen.width, screen.height) < 820;
+    return coarse || (navigator.maxTouchPoints > 0 && small);
+  } catch (_) { return false; }
 }
 
 // ---------------------------------------------------------------------------
@@ -796,6 +806,7 @@ function applyOutcome(session, result) {
 
 const LAYER_ENV = 0, LAYER_GAME = 1, LAYER_SEL = 2, LAYER_FX = 3;
 
+const LANTERN = 6;
 const FRAMING = { tiltDeg: 54, halfW: 7.1, halfH: 3.55, lookX: 0.35, lookZ: 0.1, fov: 42 };
 
 function makeLeatherTexture(base = '#7a4a2a') {
@@ -813,15 +824,157 @@ function makeLeatherTexture(base = '#7a4a2a') {
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(3, 2);
+  tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
+}
+
+// Detailed tier: 512 px seeded leather (mottling, pores, creases) as a colour map plus a
+// matching grey-scale bump map. Deterministic (seeded), never touches the rules RNG.
+function makeLeatherMaps(base) {
+  const N = 512;
+  const c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d');
+  const b = document.createElement('canvas');
+  b.width = b.height = N;
+  const gb = b.getContext('2d');
+  g.fillStyle = base; g.fillRect(0, 0, N, N);
+  gb.fillStyle = '#808080'; gb.fillRect(0, 0, N, N);
+  const rng = Rules.createRng(Rules.hashSeed('leather:detail'));
+  const both = (fn) => { fn(g, false); fn(gb, true); };
+  // Broad mottling (wraps across the tile edges so the repeat is seamless).
+  for (let i = 0; i < 70; i++) {
+    const x = rng.next() * N, y = rng.next() * N, r = 30 + rng.next() * 90;
+    const light = rng.next() > 0.5, a = 0.035 + rng.next() * 0.05;
+    for (const dx of [-N, 0, N]) for (const dy of [-N, 0, N]) {
+      both((ctx, bump) => {
+        const grd = ctx.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r);
+        const col = bump ? (light ? '255,255,255' : '0,0,0') : (light ? '255,236,200' : '30,14,4');
+        grd.addColorStop(0, `rgba(${col},${bump ? a * 1.5 : a})`);
+        grd.addColorStop(1, `rgba(${col},0)`);
+        ctx.fillStyle = grd;
+        ctx.fillRect(x + dx - r, y + dy - r, r * 2, r * 2);
+      });
+    }
+  }
+  // Pores.
+  for (let i = 0; i < 16000; i++) {
+    const x = rng.int(N), y = rng.int(N), s = 1 + rng.int(2), dark = rng.next() > 0.35;
+    g.fillStyle = `rgba(${dark ? '20,10,2' : '255,240,210'},${0.03 + rng.next() * 0.06})`;
+    g.fillRect(x, y, s, s);
+    gb.fillStyle = `rgba(${dark ? '0,0,0' : '255,255,255'},${0.15 + rng.next() * 0.2})`;
+    gb.fillRect(x, y, s, s);
+  }
+  // Fine creases.
+  for (let i = 0; i < 90; i++) {
+    let x = rng.next() * N, y = rng.next() * N, a = rng.next() * Math.PI * 2;
+    const len = 8 + rng.int(26);
+    both((ctx, bump) => {
+      ctx.strokeStyle = bump ? 'rgba(0,0,0,0.35)' : 'rgba(25,12,4,0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, y);
+    });
+    for (let k = 0; k < len; k++) {
+      a += (rng.next() - 0.5) * 0.5; x += Math.cos(a) * 2; y += Math.sin(a) * 2;
+      g.lineTo(x, y); gb.lineTo(x, y);
+    }
+    g.stroke(); gb.stroke();
+  }
+  const map = new THREE.CanvasTexture(c);
+  const bump = new THREE.CanvasTexture(b);
+  for (const t of [map, bump]) {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(3, 1.5);
+    t.anisotropy = 4;
+  }
+  map.colorSpace = THREE.SRGBColorSpace;
+  return { map, bump };
+}
+
+// Wood grain (walnut frame, centre bar, table): streaky seeded rings along the u axis.
+function makeWoodTexture(seedKey, rotate = false) {
+  const W = 512, H = 128;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.fillStyle = '#d6d6d6'; g.fillRect(0, 0, W, H);
+  const rng = Rules.createRng(Rules.hashSeed(`wood:${seedKey}`));
+  for (let i = 0; i < 150; i++) {
+    const y0 = rng.next() * H, amp = 1 + rng.next() * 5, freq = (1 + rng.int(3)) * Math.PI * 2 / W, ph = rng.next() * 6;
+    const light = rng.next() > 0.55;
+    g.strokeStyle = `rgba(${light ? '255,255,255' : '0,0,0'},${0.04 + rng.next() * 0.1})`;
+    g.lineWidth = 0.6 + rng.next() * 2.2;
+    g.beginPath();
+    for (let x = 0; x <= W; x += 8) {
+      const y = y0 + Math.sin(x * freq + ph) * amp;
+      if (x === 0) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.stroke();
+  }
+  for (let i = 0; i < 5; i++) { // a few knots
+    const x = rng.next() * W, y = rng.next() * H, r = 3 + rng.next() * 6;
+    const grd = g.createRadialGradient(x, y, 0, x, y, r * 2.5);
+    grd.addColorStop(0, 'rgba(0,0,0,0.35)'); grd.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grd; g.beginPath(); g.ellipse(x, y, r * 3, r, 0, 0, Math.PI * 2); g.fill();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  if (rotate) { tex.center.set(0.5, 0.5); tex.rotation = Math.PI / 2; }
+  return tex;
+}
+
+// Bevelled marker: rounded rims and a shallow groove inside the brass ring.
+function makeMarkerGeometry(detailed) {
+  const R = LAYOUT.markR, H = LAYOUT.markH;
+  if (!detailed) return new THREE.CylinderGeometry(R, R, H, 22);
+  const pts = [];
+  const bev = 0.035;
+  pts.push(new THREE.Vector2(0, -H / 2));
+  for (let i = 0; i <= 4; i++) { // bottom rounded rim
+    const a = -Math.PI / 2 + (i / 4) * (Math.PI / 2);
+    pts.push(new THREE.Vector2(R - bev + Math.cos(a) * bev, -H / 2 + bev + Math.sin(a) * bev));
+  }
+  for (let i = 0; i <= 4; i++) { // top rounded rim
+    const a = (i / 4) * (Math.PI / 2);
+    pts.push(new THREE.Vector2(R - bev + Math.cos(a) * bev, H / 2 - bev + Math.sin(a) * bev));
+  }
+  pts.push(new THREE.Vector2(R * 0.8, H / 2));
+  pts.push(new THREE.Vector2(R * 0.74, H / 2 - 0.012));
+  pts.push(new THREE.Vector2(R * 0.5, H / 2 - 0.012));
+  pts.push(new THREE.Vector2(R * 0.44, H / 2 - 0.004));
+  pts.push(new THREE.Vector2(0, H / 2 - 0.004));
+  return new THREE.LatheGeometry(pts, 32);
 }
 
 function createRenderer(canvas) {
   let renderer = null;
   let scene = null;
   let camera = null;
-  let quality = 'medium';
   let theme = Content.themeByKey('caravan');
+  // Graphics state (see js/gfx.js). `gfx` is the resolved tier row.
+  let gfx = Gfx.resolve({ preset: 'low' }, 'low');
+  let gfxSavedJson = null;
+  let gpu = '';
+  let detected = 'balanced';
+  let composer = null;
+  let postKey = null;
+  let postToken = 0;
+  let postFailed = false;
+  let postModule = null;
+  let envTex = null;
+  let adaptiveScale = 1;
+  let frameTimes = [];
+  let fps = 0;
+  let pixelRatio = 1;
+  let lantern = null;
+  let keyLight = null;
+  let hemiLight = null;
+  let motes = null;
+  let markerGeo = null;
+  let ringMat = null;
+  let motionT = 0;
   let contextLost = false;
 
   // Scene groups
@@ -841,7 +994,13 @@ function createRenderer(canvas) {
   let particles = null;
 
   function init() {
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: quality !== 'low', powerPreference: 'default' });
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'default' });
+    try {
+      const gl = renderer.getContext();
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      gpu = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '');
+    } catch (_) { gpu = ''; }
+    detected = Gfx.detectPreset(gpu, { mobile: isMobileDevice() });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
@@ -872,37 +1031,77 @@ function createRenderer(canvas) {
 
     buildLights();
     buildParticles();
+    buildMotes();
     setTheme(theme.key);
-    applyQuality();
+    applyPixelRatio();
     resize();
   }
 
   function buildLights() {
-    // One dominant warm key, soft cool fill, contact-friendly ambient.
-    const key = new THREE.DirectionalLight(0xfff1d6, 2.4);
+    // One dominant warm key, soft cool fill, a cool rim and a warm lantern glow.
+    const key = new THREE.DirectionalLight(0xfff1d6, 1.8);
     key.position.set(4, 9, 5);
-    key.castShadow = true;
+    key.castShadow = false;
     key.shadow.mapSize.set(1024, 1024);
-    key.shadow.camera.left = -9; key.shadow.camera.right = 9;
-    key.shadow.camera.top = 6; key.shadow.camera.bottom = -6;
+    key.shadow.bias = -0.0004;
+    key.shadow.normalBias = 0.02;
+    key.shadow.radius = 3;
     key.name = 'keyLight';
-    scene.add(key);
-    const fill = new THREE.HemisphereLight(0x8fa3c8, 0x2a1c12, 0.55);
-    scene.add(fill);
+    scene.add(key, key.target);
+    keyLight = key;
+    fitShadowFrustum();
+    hemiLight = new THREE.HemisphereLight(0x8fa3c8, 0x2a1c12, 0.55);
+    scene.add(hemiLight);
     const rim = new THREE.DirectionalLight(0xc8d4f0, 0.5);
     rim.position.set(-5, 6, -4);
     scene.add(rim);
+    // Lantern off the far-left corner (as in the key art): warm pool of light on the leather.
+    lantern = new THREE.PointLight(0xffb45e, LANTERN, 16, 2);
+    lantern.position.set(-6.2, 3.2, -3.6);
+    scene.add(lantern);
+  }
+
+  // Fit the key light's orthographic shadow camera tightly around the play area (board,
+  // frame, trays and the tallest stacks), measured in light space.
+  function fitShadowFrustum() {
+    const cam = keyLight.shadow.camera;
+    keyLight.target.position.set(0, 0, 0);
+    keyLight.updateMatrixWorld();
+    keyLight.target.updateMatrixWorld();
+    const view = new THREE.Matrix4().lookAt(keyLight.position, keyLight.target.position, new THREE.Vector3(0, 1, 0));
+    view.setPosition(keyLight.position);
+    const inv = view.clone().invert();
+    const box = new THREE.Box3();
+    for (const x of [-7.6, 7.6]) for (const y of [-0.45, 1.3]) for (const z of [-4.1, 4.1]) {
+      box.expandByPoint(new THREE.Vector3(x, y, z).applyMatrix4(inv));
+    }
+    const pad = 0.3;
+    Object.assign(cam, {
+      left: box.min.x - pad, right: box.max.x + pad, bottom: box.min.y - pad, top: box.max.y + pad,
+      near: Math.max(0.1, -box.max.z - 2), far: -box.min.z + 2,
+    });
+    cam.updateProjectionMatrix();
   }
 
   function setTheme(key) {
     theme = Content.themeByKey(key);
     scene.background = new THREE.Color(theme.sky);
     scene.fog = new THREE.Fog(theme.fog, 18, 34);
-    playerMats = theme.players.map((color, i) => new THREE.MeshStandardMaterial({
-      color, roughness: 0.32, metalness: i === 0 ? 0.05 : 0.12,
-    }));
+    const detailed = gfx.detail === 'detailed';
+    playerMats.forEach((m) => m.dispose());
+    ringMat?.dispose();
+    playerMats = theme.players.map((color, i) => (detailed
+      ? new THREE.MeshPhysicalMaterial({
+        color, roughness: 0.4, metalness: 0, clearcoat: 0.6, clearcoatRoughness: 0.22,
+        envMapIntensity: i === 0 ? 0.25 : 0.4,
+      })
+      : new THREE.MeshStandardMaterial({ color, roughness: 0.32, metalness: i === 0 ? 0.05 : 0.12 })));
+    ringMat = new THREE.MeshStandardMaterial({ color: theme.accent, roughness: detailed ? 0.3 : 0.35, metalness: 0.8, envMapIntensity: 0.6 });
+    markerGeo?.dispose();
+    markerGeo = makeMarkerGeometry(detailed);
     rebuildBoard();
-    rebuildMarkers();
+    // Rebuild markers too, so a theme or detail change recolours pieces already on the table.
+    if (lastState) rebuildMarkers(lastState);
   }
 
   function rebuildAll() {
@@ -912,8 +1111,12 @@ function createRenderer(canvas) {
     disposeGroup(selGroup);
     markerMeshes.clear();
     buildParticles();
+    applyParticleTier();
     setTheme(theme.key);
-    applyQuality();
+    envTex = null;
+    applyReflections();
+    postKey = null;
+    applyPixelRatio();
     resize();
     if (lastState) sync(lastState, []);
   }
@@ -921,31 +1124,67 @@ function createRenderer(canvas) {
   function disposeGroup(group) {
     group.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
-      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
+      if (o.material) {
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => {
+          m.map?.dispose(); m.bumpMap?.dispose(); m.dispose();
+        });
+      }
     });
     group.clear();
     interactive = [];
   }
 
   function buildBoard() {
-    const feltTex = makeLeatherTexture(`#${theme.felt.toString(16).padStart(6, '0')}`);
-    const frameMat = new THREE.MeshStandardMaterial({ color: theme.frame, roughness: 0.55, metalness: 0.08 });
-    const feltMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: feltTex, roughness: 0.9, metalness: 0 });
-    const brassMat = new THREE.MeshStandardMaterial({ color: theme.accent, roughness: 0.3, metalness: 0.85 });
-    const railMat = new THREE.MeshStandardMaterial({ color: theme.rail, roughness: 0.7 });
+    const detailed = gfx.detail === 'detailed';
+    const hex = (c) => `#${c.toString(16).padStart(6, '0')}`;
+    const W = 14.6, D = 7.6, rimW = 0.55;
+    let frameMat, frameMatSide, feltMat, railMat, tableMat, pointTex = null;
+    // The field sits a shade darker than the theme felt so the light points stand out.
+    const feltHex = hex(new THREE.Color(theme.felt).lerp(new THREE.Color(theme.rail), 0.14).getHex());
+    if (detailed) {
+      const leather = makeLeatherMaps(feltHex);
+      const woodA = makeWoodTexture(theme.key);
+      const woodB = makeWoodTexture(theme.key, true);
+      const woodTable = makeWoodTexture(`${theme.key}:table`);
+      woodTable.repeat.set(19, 100);
+      woodTable.center.set(0.5, 0.5);
+      woodTable.rotation = Math.PI / 2;
+      pointTex = makeLeatherMaps('#b0b0b0');
+      pointTex.map.repeat.set(0.45, 0.45);
+      pointTex.bump.repeat.set(0.45, 0.45);
+      frameMat = new THREE.MeshPhysicalMaterial({ color: theme.frame, map: woodA, roughness: 0.42, metalness: 0, clearcoat: 0.35, clearcoatRoughness: 0.35, envMapIntensity: 0.3 });
+      frameMatSide = frameMat.clone();
+      frameMatSide.map = woodB;
+      feltMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: leather.map, bumpMap: leather.bump, bumpScale: 0.9, roughness: 0.85, metalness: 0, envMapIntensity: 0.2 });
+      railMat = new THREE.MeshStandardMaterial({ color: theme.rail, map: woodB, roughness: 0.5, envMapIntensity: 0.3 });
+      tableMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(theme.rail).multiplyScalar(0.55), map: woodTable, roughness: 0.62, envMapIntensity: 0.2 });
+    } else {
+      frameMat = frameMatSide = new THREE.MeshStandardMaterial({ color: theme.frame, roughness: 0.55, metalness: 0.08 });
+      feltMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: makeLeatherTexture(feltHex), roughness: 0.9, metalness: 0 });
+      railMat = new THREE.MeshStandardMaterial({ color: theme.rail, roughness: 0.7 });
+      tableMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(theme.rail).multiplyScalar(0.5), roughness: 0.8 });
+    }
+    const brassMat = new THREE.MeshStandardMaterial({ color: theme.accent, roughness: detailed ? 0.34 : 0.3, metalness: 0.85, envMapIntensity: 0.5 });
+
+    // Tabletop the travel board rests on: grounds the board and catches its shadow.
+    const table = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), tableMat);
+    table.rotation.x = -Math.PI / 2;
+    table.position.y = -0.43;
+    table.receiveShadow = true;
+    boardGroup.add(table);
 
     // Wooden frame (four rails) + leather field.
-    const W = 14.6, D = 7.6, rimW = 0.55;
-    const mk = (w, d, x, z) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.42, d), frameMat);
+    const mk = (w, d, x, z, mat) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.42, d), mat);
       m.position.set(x, -0.21, z);
       m.receiveShadow = true;
+      m.castShadow = true;
       boardGroup.add(m);
     };
-    mk(W, rimW, 0, -D / 2 + rimW / 2);
-    mk(W, rimW, 0, D / 2 - rimW / 2);
-    mk(rimW, D, -W / 2 + rimW / 2, 0);
-    mk(rimW, D, W / 2 - rimW / 2, 0);
+    mk(W, rimW, 0, -D / 2 + rimW / 2, frameMat);
+    mk(W, rimW, 0, D / 2 - rimW / 2, frameMat);
+    mk(rimW, D - rimW * 2, -W / 2 + rimW / 2, 0, frameMatSide);
+    mk(rimW, D - rimW * 2, W / 2 - rimW / 2, 0, frameMatSide);
 
     const field = new THREE.Mesh(new THREE.BoxGeometry(W - rimW * 2, 0.3, D - rimW * 2), feltMat);
     field.position.y = -0.15;
@@ -955,29 +1194,92 @@ function createRenderer(canvas) {
     // Center bar (the rail for struck markers).
     const bar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, D - rimW * 2), railMat);
     bar.position.y = 0.02;
+    bar.receiveShadow = true;
+    bar.castShadow = true;
     boardGroup.add(bar);
 
     // Brass corner caps + studs.
-    const capGeo = new THREE.CylinderGeometry(0.22, 0.26, 0.1, 12);
+    const capGeo = new THREE.CylinderGeometry(0.22, 0.26, 0.1, detailed ? 24 : 12);
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       const cap = new THREE.Mesh(capGeo, brassMat);
       cap.position.set(sx * (W / 2 - 0.3), 0.05, sz * (D / 2 - 0.3));
+      cap.castShadow = true;
       boardGroup.add(cap);
     }
 
-    // Triangular points: alternating two leathers, pointing toward the bar.
-    const triGeo = new THREE.CylinderGeometry(0.015, 0.38, 2.0, 3, 1);
-    triGeo.rotateY(Math.PI / 6);
-    const matA = new THREE.MeshStandardMaterial({ color: theme.board, roughness: 0.8 });
-    const matB = new THREE.MeshStandardMaterial({ color: theme.boardAlt, roughness: 0.8 });
+    if (detailed) {
+      // Brass hinges where the travel board folds, and saddle stitching around the leather.
+      const hingeGeo = new THREE.CylinderGeometry(0.075, 0.075, 0.7, 16);
+      hingeGeo.rotateZ(Math.PI / 2);
+      for (const sz of [-1, 1]) {
+        const h = new THREE.Mesh(hingeGeo, brassMat);
+        h.position.set(0, 0.03, sz * (D / 2 - rimW / 2));
+        h.castShadow = true;
+        boardGroup.add(h);
+      }
+      const inset = 0.16, fw = W - rimW * 2 - inset * 2, fd = D - rimW * 2 - inset * 2;
+      const dash = 0.13, gap = 0.08;
+      const spots = [];
+      for (const [len, horiz] of [[fw, true], [fd, false]]) {
+        for (let t = -len / 2 + gap; t + dash <= len / 2; t += dash + gap) {
+          for (const side of [-1, 1]) {
+            spots.push(horiz ? [t + dash / 2, side * fd / 2, 0] : [side * fw / 2, t + dash / 2, Math.PI / 2]);
+          }
+        }
+      }
+      const stitch = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(dash, 0.012, 0.028),
+        new THREE.MeshStandardMaterial({ color: new THREE.Color(theme.accent).lerp(new THREE.Color(0x3a2a1c), 0.25), roughness: 0.8 }),
+        spots.length,
+      );
+      const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1);
+      spots.forEach(([x, z, rot], i) => {
+        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rot);
+        stitch.setMatrixAt(i, m4.compose(new THREE.Vector3(x, 0.004, z), q, one));
+      });
+      stitch.receiveShadow = true;
+      boardGroup.add(stitch);
+    }
+
+    // Triangular points: flat inlaid leather in two alternating tones, pointing toward the bar,
+    // merged into one mesh per tone (plus a dark inlay border on the detailed tier).
+    const triA = [], triB = [], triEdge = [];
+    const baseZ = 3.0, tipZ = 0.42, halfW = 0.36;
+    const pushTri = (arr, x, zb, zt, hw, y) => {
+      const a = [x - hw, y, zb], b = [x + hw, y, zb], c = [x, y, zt];
+      // Keep counter-clockwise order seen from above so normals face up.
+      const cross = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+      arr.push(...a, ...(cross > 0 ? b : c), ...(cross > 0 ? c : b));
+    };
     for (let point = 0; point < Rules.POINTS; point++) {
       const pos = pointPos(point);
-      const tri = new THREE.Mesh(triGeo, (pointCol(point) % 2 ? matA : matB));
-      tri.rotation.x = pos.top ? -Math.PI / 2 : Math.PI / 2;
+      const s = pos.top ? -1 : 1;
+      pushTri(pointCol(point) % 2 ? triA : triB, pos.x, s * baseZ, s * tipZ, halfW, 0.006);
+      pushTri(triEdge, pos.x, s * (baseZ + 0.03), s * (tipZ - 0.07), halfW + 0.035, 0.003);
+    }
+    const triMesh = (arr, mat) => {
+      const geo = new THREE.BufferGeometry();
+      const posAttr = new THREE.Float32BufferAttribute(arr, 3);
+      geo.setAttribute('position', posAttr);
+      const uv = [], nrm = [];
+      for (let i = 0; i < posAttr.count; i++) { uv.push(posAttr.getX(i), posAttr.getZ(i)); nrm.push(0, 1, 0); }
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+      const m = new THREE.Mesh(geo, mat);
+      m.receiveShadow = true;
+      boardGroup.add(m);
+    };
+    const pointMat = (color) => new THREE.MeshStandardMaterial({
+      color, roughness: 0.8, envMapIntensity: 0.2,
+      ...(pointTex ? { map: pointTex.map, bumpMap: pointTex.bump, bumpScale: 0.6 } : {}),
+    });
+    triMesh(triA, pointMat(theme.board));
+    triMesh(triB, pointMat(theme.boardAlt));
+    triMesh(triEdge, new THREE.MeshStandardMaterial({ color: new THREE.Color(theme.rail).multiplyScalar(0.8), roughness: 0.6 }));
+
+    for (let point = 0; point < Rules.POINTS; point++) {
+      const pos = pointPos(point);
       const dir = pos.top ? 1 : -1;
-      tri.position.set(pos.x, 0.01, pos.z + dir * 1.0);
-      tri.receiveShadow = true;
-      boardGroup.add(tri);
 
       // Explicit interaction volume for this point (raycast layer only).
       const hit = new THREE.Mesh(
@@ -1027,7 +1329,6 @@ function createRenderer(canvas) {
 
   // --- markers -------------------------------------------------------------
 
-  const markerGeo = new THREE.CylinderGeometry(LAYOUT.markR, LAYOUT.markR, LAYOUT.markH, 22);
   const capRingGeo = new THREE.TorusGeometry(LAYOUT.markR * 0.62, 0.022, 8, 22);
 
   function desiredMarkers(state) {
@@ -1064,9 +1365,8 @@ function createRenderer(canvas) {
       mesh.position.set(d.pos.x, d.pos.y, d.pos.z);
       mesh.castShadow = true;
       mesh.layers.set(LAYER_GAME);
-      const ring = new THREE.Mesh(capRingGeo, new THREE.MeshStandardMaterial({
-        color: theme.accent, roughness: 0.35, metalness: 0.8,
-      }));
+      mesh.receiveShadow = true;
+      const ring = new THREE.Mesh(capRingGeo, ringMat);
       ring.rotation.x = Math.PI / 2;
       ring.position.y = LAYOUT.markH / 2;
       mesh.add(ring);
@@ -1078,7 +1378,10 @@ function createRenderer(canvas) {
 
   function disposeChildren(group) {
     for (const child of [...group.children]) {
-      child.traverse((o) => { if (o.material && o.geometry !== markerGeo && o.geometry !== capRingGeo) o.material.dispose?.(); });
+      // Marker body and ring materials are shared per theme; only per-object materials go.
+      child.traverse((o) => {
+        if (o.material && o.geometry !== markerGeo && o.geometry !== capRingGeo && o.material !== ringMat) o.material.dispose?.();
+      });
       group.remove(child);
     }
   }
@@ -1145,8 +1448,9 @@ function createRenderer(canvas) {
   function setSelection(origin, targets, hitTargets) {
     clearSelection();
     const mkFlat = (geo, color, opacity) => {
+      // Selection decals keep their exact colours (no tone mapping) so they always read clearly.
       const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-        color, transparent: true, opacity, depthWrite: false,
+        color, transparent: true, opacity, depthWrite: false, toneMapped: false,
       }));
       m.rotation.x = -Math.PI / 2;
       m.layers.set(LAYER_SEL);
@@ -1258,23 +1562,169 @@ function createRenderer(canvas) {
       camera.lookAt(FRAMING.lookX, 0, FRAMING.lookZ);
     }
     renderer.setSize(w, h, false);
-    applyQuality();
+    applyPixelRatio();
   }
 
-  function applyQuality() {
+  // --- graphics settings ----------------------------------------------------------
+
+  // Pixel ratio = min(device ratio, preset cap) × preset/user scale × adaptive scale.
+  function applyPixelRatio() {
     if (!renderer) return;
-    const dprCap = quality === 'low' ? 1 : quality === 'medium' ? 1.5 : 2;
-    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, dprCap));
-    const key = scene.getObjectByName('keyLight');
-    if (key) key.castShadow = quality === 'high';
-    renderer.shadowMap.enabled = quality === 'high';
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    const ratio = Math.min(3, Math.min(devicePixelRatio || 1, gfx.dprCap) * gfx.scale * adaptiveScale);
+    if (Math.abs(ratio - pixelRatio) > 1e-3 || renderer.getPixelRatio() !== ratio) {
+      pixelRatio = ratio;
+      renderer.setPixelRatio(ratio);
+    }
   }
 
-  function setQuality(q) {
-    if (q === quality) return;
-    quality = q;
-    if (renderer) applyQuality();
+  function loadPost() {
+    if (!postModule) postModule = import('./post.js');
+    return postModule;
+  }
+
+  /** Apply saved graphics settings live (see js/gfx.js for the model). */
+  function setGraphics(saved) {
+    const json = JSON.stringify(saved || {});
+    if (json === gfxSavedJson) return;
+    gfxSavedJson = json;
+    const prev = gfx;
+    gfx = Gfx.resolve(saved, detected);
+    // Shadows: enable/size the key light's map; lit materials recompile for the change.
+    const size = Gfx.SHADOW_MAP[gfx.shadows];
+    const shadowsChanged = renderer.shadowMap.enabled !== size > 0;
+    renderer.shadowMap.enabled = size > 0;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    keyLight.castShadow = size > 0;
+    if (size > 0 && keyLight.shadow.mapSize.x !== size) {
+      keyLight.shadow.mapSize.set(size, size);
+      keyLight.shadow.map?.dispose();
+      keyLight.shadow.map = null;
+    }
+    if (shadowsChanged) scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.needsUpdate = true; }); });
+    // Board detail swaps textures, geometry and materials.
+    if (prev.detail !== gfx.detail) setTheme(theme.key);
+    // The lantern pool is part of the detailed look; Low skips the extra light entirely.
+    lantern.visible = gfx.detail === 'detailed';
+    applyReflections();
+    applyParticleTier();
+    if (motes) motes.points.visible = gfx.background === 'animated' && !settings.reducedMotion;
+    adaptiveScale = 1;
+    frameTimes = [];
+    postKey = null; // rebuild the post chain on the next frame
+    applyPixelRatio();
+    const fpsEl = document.getElementById('bb-fps');
+    if (fpsEl) fpsEl.hidden = !gfx.showFps;
+    document.body.dataset.gfxPreset = gfx.preset;
+    document.body.dataset.gfxAuto = gfx.auto ? '1' : '0';
+    canvas.dataset.gfxPreset = gfx.preset;
+    for (const cat of Object.keys(Gfx.CATEGORIES)) canvas.dataset[`gfx${cat[0].toUpperCase()}${cat.slice(1)}`] = gfx[cat];
+  }
+
+  function applyReflections() {
+    const on = gfx.reflections === 'on';
+    // Image-based lighting replaces part of the flat hemisphere fill.
+    hemiLight.intensity = on ? 0.22 : 0.55;
+    if (!on) { scene.environment = null; return; }
+    if (envTex) { scene.environment = envTex; return; }
+    loadPost().then((m) => {
+      if (!envTex) envTex = m.makeEnvironment(renderer);
+      if (gfx.reflections === 'on') scene.environment = envTex;
+    }).catch(() => { postFailed = true; hemiLight.intensity = 0.55; });
+  }
+
+  function applyParticleTier() {
+    if (!particles) return;
+    const high = gfx.particles === 'high';
+    particles.mat.size = high ? 0.1 : 0.09;
+    particles.mat.blending = high ? THREE.AdditiveBlending : THREE.NormalBlending;
+    particles.mat.needsUpdate = true;
+  }
+
+  function graphicsInfo() {
+    const w = canvas.clientWidth || innerWidth, h = canvas.clientHeight || innerHeight;
+    return {
+      gpu, detected, resolved: gfx,
+      pixels: [Math.round(w * pixelRatio), Math.round(h * pixelRatio)],
+      fps: Math.round(fps), adaptiveScale: Math.round(adaptiveScale * 100) / 100,
+      postFailed,
+    };
+  }
+
+  function postKeyFor(w, h) {
+    return gfx.post && !postFailed ? [gfx.ao, gfx.bloom, gfx.grade, gfx.antialias, w, h, pixelRatio].join('|') : 'none';
+  }
+
+  function rebuildPost(w, h) {
+    composer?.dispose();
+    composer = null;
+    const token = ++postToken;
+    if (!gfx.post || postFailed) return;
+    loadPost().then((m) => {
+      if (token !== postToken) return;
+      try {
+        composer = m.buildComposer(renderer, scene, camera, gfx, w, h, pixelRatio, [selGroup, fxGroup]);
+      } catch (_) {
+        // Post-processing is an enhancement: render directly and say so in the Graphics panel.
+        postFailed = true;
+        composer = null;
+      }
+    }).catch(() => { postFailed = true; });
+  }
+
+  // Adaptive resolution: average ~90 frames; step down when slow, back up when fast.
+  let fpsWin = { n: 0, ms: 0 };
+  function adapt(frameMs) {
+    // Frame-rate readout refreshes about twice a second.
+    fpsWin.n += 1; fpsWin.ms += frameMs;
+    if (fpsWin.ms >= 500) {
+      fps = (1000 * fpsWin.n) / fpsWin.ms;
+      fpsWin = { n: 0, ms: 0 };
+      const fpsEl = document.getElementById('bb-fps');
+      if (fpsEl && !fpsEl.hidden) fpsEl.textContent = `${Math.round(fps)} fps · ${Math.round(pixelRatio * 100) / 100}×`;
+    }
+    frameTimes.push(frameMs);
+    if (frameTimes.length < 90) return;
+    const avg = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
+    frameTimes = [];
+    if (!gfx.adaptive) return;
+    const before = adaptiveScale;
+    if (avg > 26) adaptiveScale = Math.max(0.6, adaptiveScale - 0.1);
+    else if (avg < 14 && adaptiveScale < 1) adaptiveScale = Math.min(1, adaptiveScale + 0.05);
+    if (before !== adaptiveScale) applyPixelRatio();
+  }
+
+  // Dust motes drifting through the lantern light (background: animated).
+  function buildMotes() {
+    const N = 40;
+    const geo = new THREE.BufferGeometry();
+    const arr = new Float32Array(N * 3);
+    const rng = Rules.createRng(Rules.hashSeed('motes'));
+    const seeds = [];
+    for (let i = 0; i < N; i++) {
+      seeds.push({ x: (rng.next() - 0.5) * 12, y: 0.6 + rng.next() * 2.4, z: (rng.next() - 0.5) * 6.5, p: rng.next() * 6.28, s: 0.1 + rng.next() * 0.2 });
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+    const mat = new THREE.PointsMaterial({
+      color: 0xffd9a0, size: 0.03, transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const points = new THREE.Points(geo, mat);
+    points.layers.set(LAYER_FX);
+    points.frustumCulled = false;
+    points.raycast = () => {};
+    points.visible = false;
+    fxGroup.add(points);
+    motes = { points, seeds, arr, geo };
+    updateMotes(0);
+  }
+
+  function updateMotes(t) {
+    const { seeds, arr, geo } = motes;
+    seeds.forEach((m, i) => {
+      arr[i * 3] = m.x + Math.sin(t * m.s + m.p) * 0.6;
+      arr[i * 3 + 1] = m.y + Math.sin(t * m.s * 0.7 + m.p * 2) * 0.35;
+      arr[i * 3 + 2] = m.z + Math.cos(t * m.s * 0.8 + m.p) * 0.5;
+    });
+    geo.attributes.position.needsUpdate = true;
   }
 
   // --- particles ----------------------------------------------------------------
@@ -1302,6 +1752,7 @@ function createRenderer(canvas) {
 
   function burst(x, y, z, color, n) {
     if (settings.reducedMotion || !particles) return;
+    if (gfx.particles === 'low') n = Math.ceil(n / 2);
     const c = new THREE.Color(color);
     const rng = Rules.createRng(Rules.hashSeed(`fx:${x}:${z}:${performance.now() | 0}`));
     for (let i = 0; i < n; i++) {
@@ -1366,8 +1817,10 @@ function createRenderer(canvas) {
   let framingKey = '', framingCheckAt = 0;
   function frame(t) {
     rafId = requestAnimationFrame(frame);
-    const dt = Math.min(0.05, (t - lastT) / 1000 || 0.016);
+    const rawMs = t - lastT;
+    const dt = Math.min(0.05, rawMs / 1000 || 0.016);
     lastT = t;
+    if (rawMs > 0 && rawMs < 250) adapt(rawMs);
     // HUD chrome (rails, tray, tutorial card) appears and disappears without
     // a window resize; re-fit the board whenever the safe rectangle changes.
     if (t > framingCheckAt) {
@@ -1410,7 +1863,19 @@ function createRenderer(canvas) {
       if (!camTween) { camera.position.copy(cameraHome()); camera.lookAt(FRAMING.lookX, 0, FRAMING.lookZ); }
     }
     updateParticles(dt);
-    renderer.render(scene, camera);
+    // Ambient motion: lantern flicker and drifting motes; frozen with reduced motion.
+    const animated = gfx.background === 'animated' && !settings.reducedMotion;
+    if (animated) {
+      motionT += dt;
+      lantern.intensity = LANTERN * (1 + 0.05 * Math.sin(motionT * 7.3) + 0.03 * Math.sin(motionT * 13.1 + 1.7));
+      updateMotes(motionT);
+    } else if (lantern.intensity !== LANTERN) lantern.intensity = LANTERN;
+    if (motes.points.visible !== animated) motes.points.visible = animated;
+    const w = canvas.clientWidth || innerWidth, h = canvas.clientHeight || innerHeight;
+    const key = postKeyFor(w, h);
+    if (key !== postKey) { postKey = key; rebuildPost(w, h); }
+    if (composer) composer.render(dt);
+    else renderer.render(scene, camera);
   }
 
   function startLoop() {
@@ -1438,7 +1903,7 @@ function createRenderer(canvas) {
   init();
 
   return {
-    setTheme, setQuality, sync, setSelection, clearSelection, settle,
+    setTheme, setGraphics, graphicsInfo, sync, setSelection, clearSelection, settle,
     resize, pick, startLoop, stopLoop, introCamera, shakeCamera,
     pointPos, markerPos, railPos, offPos, pointScreenPos, burst,
     isContextLost: () => contextLost,
@@ -2325,12 +2790,8 @@ function showSettings(returnTo = 'title') {
         <div class="bb-field"><label for="s-vol-${bus}">${bus[0].toUpperCase() + bus.slice(1)} volume</label>
         <input type="range" id="s-vol-${bus}" min="0" max="100" value="${Math.round(settings.volume[bus] * 100)}" /></div>`).join('')}
     </section>
-    <section class="bb-section bb-form">
-      <h2>Graphics</h2>
-      <div class="bb-field"><label for="s-quality">Quality tier</label>
-        <select id="s-quality">
-          ${['auto', 'low', 'medium', 'high'].map((q) => `<option value="${q}" ${settings.quality === q ? 'selected' : ''}>${q[0].toUpperCase() + q.slice(1)}</option>`).join('')}
-        </select></div>
+    <section class="bb-section bb-form" id="s-gfx-section" aria-labelledby="s-gfx-title">
+      <div id="s-gfx-body" class="bb-form"></div>
       <div class="bb-field"><label for="s-theme">Default theme</label>
         <select id="s-theme">${Content.THEMES.map((t) => `<option value="${t.key}" ${settings.theme === t.key ? 'selected' : ''}>${t.label}</option>`).join('')}</select></div>
     </section>
@@ -2363,7 +2824,7 @@ function showSettings(returnTo = 'title') {
   for (const bus of ['music', 'effects', 'ambience', 'voice']) {
     change(`#s-vol-${bus}`, (t) => { settings.volume[bus] = Number(t.value) / 100; });
   }
-  change('#s-quality', (t) => { settings.quality = t.value; });
+  renderGraphicsSection();
   change('#s-theme', (t) => { settings.theme = t.value; if (!session) rendererApi.setTheme(t.value); });
   change('#s-rm', (t) => { settings.reducedMotion = t.checked; });
   change('#s-hc', (t) => { settings.highContrast = t.checked; });
@@ -2396,6 +2857,97 @@ function showSettings(returnTo = 'title') {
       updateMirror();
     } else showTitle();
   });
+}
+
+// --- graphics settings section -------------------------------------------------------
+
+const GFX_L = gfxStrings(pickLocale(typeof navigator !== 'undefined' ? navigator.languages || [navigator.language] : []));
+let gfxSummaryTimer = 0;
+
+function graphicsSummary() {
+  const info = rendererApi?.graphicsInfo();
+  if (!info) return '';
+  return `${info.gpu || GFX_L.unknownGpu} · ${Gfx.describe(info.resolved, info.pixels, GFX_L.words)}`;
+}
+
+// Builds (or rebuilds, after a preset change clears overrides) the Graphics controls.
+function renderGraphicsSection() {
+  const body = $('#s-gfx-body');
+  if (!body) return;
+  const L = GFX_L;
+  const g = settings.graphics;
+  const info = rendererApi?.graphicsInfo();
+  const detected = info?.detected || 'balanced';
+  const resolvedPreset = info?.resolved.preset || detected;
+  const opt = (v, label, cur) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${esc(label)}</option>`;
+  const presetVal = Gfx.PRESETS.includes(g.preset) ? g.preset : 'auto';
+  body.innerHTML = `
+    <h2 id="s-gfx-title">${esc(L.title)}</h2>
+    <div class="bb-field"><label for="s-quality">${esc(L.quality)}</label>
+      <select id="s-quality" data-gfx="preset">
+        ${opt('auto', L.auto.replace('{tier}', L.preset[detected]), presetVal)}
+        ${Gfx.PRESETS.map((p) => opt(p, L.preset[p], presetVal)).join('')}
+      </select></div>
+    <div class="bb-field"><label for="s-gfx-scale">${esc(L.renderScale)}: <output id="s-gfx-scale-val" for="s-gfx-scale">${Math.round((g.render_scale || 1) * 100)}%</output></label>
+      <input type="range" id="s-gfx-scale" data-gfx="render_scale" min="50" max="200" step="5" value="${Math.round((g.render_scale || 1) * 100)}" /></div>
+    <div class="bb-gfx-grid">
+      ${Object.entries(Gfx.CATEGORIES).map(([cat, tiers]) => `
+        <div class="bb-field"><label for="s-gfx-${cat}">${esc(L.cat[cat])}</label>
+          <select id="s-gfx-${cat}" data-gfx="${cat}">
+            ${opt('preset', L.fromPreset.replace('{tier}', L.tier[Gfx.presetTier(resolvedPreset, cat)]), tiers.includes(g[cat]) ? '' : 'preset')}
+            ${tiers.map((t) => opt(t, L.tier[t], g[cat])).join('')}
+          </select></div>`).join('')}
+    </div>
+    <div class="bb-check"><input type="checkbox" id="s-gfx-adaptive" data-gfx="adaptive" ${g.adaptive !== false ? 'checked' : ''} /><label for="s-gfx-adaptive">${esc(L.adaptive)}</label></div>
+    <div class="bb-check"><input type="checkbox" id="s-gfx-fps" data-gfx="show_fps" ${g.show_fps ? 'checked' : ''} /><label for="s-gfx-fps">${esc(L.showFps)}</label></div>
+    <p class="bb-gfx-summary" id="s-gfx-summary">${esc(graphicsSummary())}</p>
+    <p class="bb-gfx-note" id="s-gfx-note" ${info?.postFailed ? '' : 'hidden'}>${esc(L.postFailed)}</p>`;
+
+  const commit = (rerender = false) => {
+    saveSettings();
+    applySettings();
+    funnel.track('settings_change', 'graphics');
+    if (rerender) {
+      const focusId = document.activeElement?.id;
+      renderGraphicsSection();
+      if (focusId) $(`#${focusId}`)?.focus();
+    } else refreshGraphicsSummary();
+  };
+  $('#s-quality').addEventListener('change', (e) => {
+    settings.graphics = Gfx.choosePreset(settings.graphics, e.target.value);
+    commit(true);
+  });
+  const scale = $('#s-gfx-scale');
+  scale.addEventListener('input', () => {
+    $('#s-gfx-scale-val').textContent = `${scale.value}%`;
+    settings.graphics.render_scale = Number(scale.value) / 100;
+    applySettings();
+  });
+  scale.addEventListener('change', () => commit());
+  for (const cat of Object.keys(Gfx.CATEGORIES)) {
+    $(`#s-gfx-${cat}`).addEventListener('change', (e) => {
+      if (e.target.value === 'preset') delete settings.graphics[cat];
+      else settings.graphics[cat] = e.target.value;
+      commit();
+    });
+  }
+  $('#s-gfx-adaptive').addEventListener('change', (e) => { settings.graphics.adaptive = e.target.checked; commit(); });
+  $('#s-gfx-fps').addEventListener('change', (e) => { settings.graphics.show_fps = e.target.checked; commit(); });
+
+  clearInterval(gfxSummaryTimer);
+  gfxSummaryTimer = setInterval(() => {
+    if (!$('#s-gfx-summary')) { clearInterval(gfxSummaryTimer); return; }
+    refreshGraphicsSummary();
+  }, 1000);
+}
+
+function refreshGraphicsSummary() {
+  const el = $('#s-gfx-summary');
+  if (!el) return;
+  const text = graphicsSummary();
+  if (el.textContent !== text) el.textContent = text;
+  const note = $('#s-gfx-note');
+  if (note) note.hidden = !rendererApi?.graphicsInfo().postFailed;
 }
 
 // --- help --------------------------------------------------------------------------

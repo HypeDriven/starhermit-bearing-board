@@ -12,27 +12,31 @@
 | Players | 1 human vs 1–3 deterministic AI rivals; 2-human pass-and-play on one device (practice only) |
 | Session length | Practice duel 10–20 min; lessons 1–3 min; endgame stages 3–6 min; four-caravan circuits up to 25 min |
 | Platforms | Desktop and mobile browsers with WebGL; portrait and landscape |
-| Rendering | Three.js (`vendor/three.module.min.js`) perspective scene on one canvas, all geometry procedural; semantic HTML UI layered over it |
+| Rendering | Three.js r160 (`vendor/three.module.min.js` + same-revision addons) perspective scene on one canvas, all geometry procedural, optional post-processing; semantic HTML UI layered over it |
 | Offline | Fully playable without the server; the server adds hosted daily tables and time sync |
 
 File map (everything that ships or is run):
 
 | Path | Responsibility |
 |---|---|
-| `index.html` | Shell: canvas, HUD, rails, action tray, tutorial card, cube/pause dialogs, screen container, live regions, board mirror |
+| `index.html` | Shell: import map (`three`, `three/addons/`), canvas, HUD, rails, action tray, tutorial card, cube/pause dialogs, screen container, live regions, board mirror, frame-rate readout |
 | `css/main.css` | Palette tokens, HUD/rail/tray layout, screens, breakpoints, accessibility variants |
 | `js/rules.js` | Pure deterministic rules engine: config validation, move generation, `applyCommand`, scoring, hashing, replay |
 | `js/ai.js` | Practice AI (casual / steady / sharp) and the hint generator, over the same legal-move API |
 | `js/content.js` | Versioned content: 6 lessons, 40 journey stages, 8 challenges, daily generator, practice factory, 5 themes, 9 achievements, mastery tiers, validators |
 | `js/audio.js` | WebAudio buses, procedural fallbacks, ambience, adaptive pad, sample loader for `sfx/*.opus` |
-| `js/main.js` | Everything else: settings, progress, session controller, renderer, input, HUD, screens, platform adapter, boot |
+| `js/main.js` | Everything else: settings, progress, session controller, renderer, input, HUD, screens (including the Graphics settings section), platform adapter, boot |
+| `js/gfx.js` | Pure graphics quality model: presets, categories, GPU detection, `resolve`, `presetTier`, `choosePreset`, `describe` |
+| `js/gfx-strings.js` | Graphics-section strings in the nine supported locales, `pickLocale` |
+| `js/post.js` | Loaded on demand: EffectComposer chain (GTAO, bloom, grade + vignette, SMAA/FXAA) and the PMREM room environment |
 | `server.js` | Static host plus same-origin `/api/v1` (time, authoritative sessions, replay) running the same `rules.js` |
 | `starhermit.txt` | Platform manifest: `name`, `launch=index.html`, `owner`, `server=server.js`, `version`, `contentVersion`, `cover` |
 | `assets/` | `key-art.webp` (title), `results-victory.webp`, `results-road.webp` |
 | `sfx/` | 21 Opus clips, `manifest.txt` (canonical), `manifest.json` (generator input), `manifest.md` (generator output) |
 | `coverart.png`, `icon.png`, `favicon.svg` | Store cover (1200x675) and icons |
-| `tests/` | `rules`, `replay`, `content`, `server` node tests; `e2e.mjs` browser playthrough; `smoke.mjs` server boot check |
-| `vendor/three.module.min.js` | Three.js (MIT) |
+| `tests/` | `rules`, `replay`, `content`, `server`, `gfx` node tests; `e2e.mjs` browser playthrough; `smoke.mjs` server boot check |
+| `vendor/three.module.min.js` | Three.js r160 (MIT) |
+| `vendor/three/addons/` | Three.js r160 (`three@0.160.1`) `examples/jsm` files used by `js/post.js`: postprocessing passes, their shaders, `SimplexNoise`, `RoomEnvironment` |
 | `data/`, `tools/` | Present but empty; content lives in `js/content.js` |
 
 ## 2. Vision and design pillars
@@ -162,7 +166,9 @@ Layouts (`css/main.css`):
 
 High-contrast mode swaps the UI tokens to pure black / white / `#ffdf4d`. The human is always the light disc; rival colours are reinforced by name and pip rows, never colour alone.
 
-**Shape and material.** Boxes and cylinders only; a seeded 128 px canvas speckle texture stands in for leather grain (`makeLeatherTexture`); PBR `MeshStandardMaterial` with ACES tone mapping at exposure 1.05; one warm key light (`#fff1d6`, shadows on the high tier), a cool hemisphere fill and a rim. Points alternate two leather tones and taper toward the bar.
+**Shape and material.** Boxes, cylinders, lathes and flat inlays only, all procedural. The board rests on a dark wooden tabletop that fades into the fog. The leather field is a shade darker than the theme felt; points are flat inlaid triangles in two alternating leather tones with a dark inlay border, merged into one mesh per tone, tapering toward the bar. PBR materials with ACES tone mapping at exposure 1.05 and sRGB output; one warm key light (`#fff1d6`) whose shadow frustum is fitted to the play area in light space, a cool hemisphere fill, a cool rim and (detailed tier) a warm lantern point light off the far-left corner, echoing the key art. Plain detail uses a seeded 128 px speckle (`makeLeatherTexture`) and cylinder markers; detailed uses seeded 512 px leather colour + bump maps with mottling, pores and creases (`makeLeatherMaps`), wood-grain maps on the lacquered walnut frame, bar and table (`makeWoodTexture`), saddle stitching around the field (one instanced mesh), brass hinges at the fold, and bevelled lathe markers with a groove under the brass ring in clearcoated `MeshPhysicalMaterial` (`makeMarkerGeometry`).
+
+**Graphics.** Optional effects: key-light PCF soft shadows (1024² / 2048² / 4096²), GTAO ambient occlusion for contact darkening under markers and along the frame (particles and selection decals are hidden from its depth pass), bloom limited to highlights and sparks (threshold 0.9), a colour grade with warm highlights, cooler shadows, gentle S-curve and vignette, FXAA/SMAA/MSAA anti-aliasing, image-based reflections from a PMREM `RoomEnvironment` on brass, lacquer and clearcoat, the detailed board textures and geometry above, particle bursts (Low halves the counts; High uses additive sparks that bloom) and ambient motion (lantern flicker and forty drifting dust motes, stopped by reduced motion). Selection rings and target discs are not tone-mapped, so they keep their exact colours. The Settings screen's **Graphics** section offers a quality preset (Auto, chosen from the WebGL unmasked renderer string, where software renderers get Low, discrete GPUs and Apple M get High, everything else Balanced, and touch/small-screen devices are capped at Balanced; Low; Balanced; High; Ultra), a render scale (50–200%, multiplying the preset's), one override per category (shadows, ambient occlusion, bloom, colour grade, anti-aliasing, reflections, board detail, particles, ambient motion; "From preset (…)" by default; choosing a preset clears overrides), adaptive resolution (on by default; averages 90 frames, steps down 0.1 to a floor of 0.6 when frames average over 26 ms and back up 0.05 when under 14 ms) and a frame-rate readout, plus a summary line "GPU · cost summary · W×H px". Pixel ratio = min(device ratio, preset cap 1 / 1.5 / 2 / 2) × preset scale (Ultra 1.25) × render scale × adaptive scale, capped at 3. Changes apply immediately and persist in `bb.settings.v1` under `graphics`; the resolved preset and tiers are mirrored as `data-gfx-*` attributes on `body` and `#bb-canvas`. The post chain and environment are loaded with a dynamic `import('./post.js')` only when needed; if they cannot be built the board renders directly and the section shows a note. Low renders without a composer, lantern, environment or motes.
 
 **Typography.** System UI stack (`system-ui, -apple-system, Segoe UI, Roboto`), title in accent brass with 0.06em tracking, rail titles uppercase 0.78em with 0.14em tracking, monospace `kbd` chips for bindings; `Larger text` scales the root by 1.2.
 
@@ -204,7 +210,7 @@ This table is the source of `sfx/manifest.txt`; `sfx/manifest.json` carries the 
 
 ## 10. Localization
 
-Shipped language: English only (`<html lang="en">`); all strings are inline literals in `js/main.js` (UI), `js/content.js` (stage names, blurbs, tutorial steps, achievements) and `js/rules.js` (breakdown labels). No language selector exists and `navigator.language` is not read. The required set — en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT — is design intent (see the final section). Layout already tolerates expansion: buttons wrap in the tray, tiles are `minmax(13.5rem,1fr)`, objective and rail text cap at 70ch and wrap, and `[dir="rtl"]` flips the tray.
+Shipped language: English (`<html lang="en">`), except the Graphics settings section, whose strings (`js/gfx-strings.js`) follow `navigator.languages` across en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR and it-IT (exact match, then language family, else en-US). All other strings are inline literals in `js/main.js` (UI), `js/content.js` (stage names, blurbs, tutorial steps, achievements) and `js/rules.js` (breakdown labels). No language selector exists. Localizing the rest of the game into the same set is design intent (see the final section). Layout already tolerates expansion: buttons wrap in the tray, tiles are `minmax(13.5rem,1fr)`, objective and rail text cap at 70ch and wrap, and `[dir="rtl"]` flips the tray.
 
 ## 11. Accessibility
 
@@ -230,15 +236,16 @@ Conventions from https://wiki.starhermit.com/ used today:
 - **Persistence keys:** `bb.settings.v1`, `bb.progress.v1` (`{data, check}` FNV checksum; rejected if it does not verify), `bb.snapshot.v1` (cfg + log + hash + def, cleared on finish), `bb.dailySession.v1` (hosted session pointer), `bb.funnel.v1` (anonymous local funnel events: boot, start, tutorial step, round end, retry, undo, settings change, quit, error category; capped at 200). Storage falls back to an in-memory map when `localStorage` is unavailable.
 - **Determinism:** three seeded streams — rules (`seed ^ STREAM_RULES`), audio (`sfx:<event>:<seed>`, `music:<seed>`), particles (position + time). `tests/replay.test.mjs` proves identical hashes for identical seed + commands across 30 games.
 - **Renderer layers:** environment 0, gameplay 1 (the only raycast layer; invisible box volumes per point, rail and off trays), selection 2, effects 3 (particles have a no-op `raycast`). Context loss rebuilds GPU resources from theme + last state.
-- **Quality tiers:** `auto` picks `medium` for coarse pointers or screens under 820 px, else `high`; DPR caps 1 / 1.5 / 2; shadows and the 1024² shadow map only on `high`; antialiasing off on `low`. Hidden tabs stop the RAF loop. Draw calls stay under ~200 (24 points + 24 hit volumes + ≤ 46 markers with rings + frame, trays, particles).
-- **E2E drive.** `tests/e2e.mjs` starts its own static server on an ephemeral port (answering `/api/v1/*` with `{}` so the offline path is taken), launches headless Chrome with SwiftShader, and plays a complete practice duel at 1280×800 and 390×844 (touch) purely through visible DOM: title `Play now`, settings (reduced motion, low quality), `Roll`, arrow-key roving focus + `Enter` on mirror buttons, `Pass`, `Hint`, `Undo`, pause → settings → resume, cube `Accept`, then verifies the results table and returns to the menu; any console error or page error fails the run.
+- **Quality model:** see **Graphics** in §8. `createRenderer` exposes `setGraphics(saved)` (idempotent per settings JSON; resizes/enables the shadow map and recompiles lit materials, rebuilds board and markers when the detail tier changes, swaps the environment, re-keys the post chain) and `graphicsInfo()` (GPU, detected preset, resolved tiers, pixels, fps, adaptive scale, post failure). The old `quality` setting migrates once (`medium` → Balanced). The canvas is created with MSAA; the composer's half-float target uses 4× MSAA for the `msaa` tier. Hidden tabs stop the RAF loop. Draw calls stay under ~200 (points merged into three meshes, hit volumes, ≤ 46 markers with rings, frame, trays, particles).
+- **E2E drive.** `tests/e2e.mjs` starts its own static server on an ephemeral port (answering `/api/v1/*` with `{}` so the offline path is taken), launches headless Chrome with SwiftShader, and plays a complete practice duel at 1280×800 and 390×844 (touch) purely through visible DOM: title `Play now`, settings (reduced motion, low quality), the Graphics section (Ultra, Low, High, a bloom override, reload persistence, preset clears overrides), `Roll`, arrow-key roving focus + `Enter` on mirror buttons, `Pass`, `Hint`, `Undo`, pause → settings → resume, cube `Accept`, then verifies the results table and returns to the menu; any console error, console warning or page error fails the run. Chrome is launched without `DISPLAY`/`WAYLAND_DISPLAY` so a stuck desktop compositor cannot hang GPU start-up.
 
 ## 14. Testing and acceptance criteria
 
-`npm test` (`node --test tests/*.test.mjs`, 38 tests, no dependencies):
+`npm test` (`node --test tests/*.test.mjs`, 45 tests, no dependencies):
 - `rules.test.mjs`: layouts, validation messages, doubles, hits, rail priority, higher-die rule, bear-off gates, win breakdown, gammon/backgammon factors, cube offer/accept/ownership/decline payout, pass legality, out-of-turn and malformed commands, concede in duel and circuit, move-limit tiebreak, serialization round-trip, marker conservation, circuit direction, layout helper.
 - `replay.test.mjs`: 30-game hash reproducibility, AI-vs-AI termination bound, malformed-command fuzzing, hash divergence across seeds, envelope invariants.
 - `content.test.mjs`: every lesson/stage/challenge/daily passes `validateContent`; counts (6/40/8/5); sampled tables terminate under the steady AI; daily determinism; achievement key format; practice constraints; stable journey seeds; scripted dice stay legal.
+- `gfx.test.mjs`: GPU-string detection (software → Low, discrete/Apple M → High, mobile cap), `resolve` with auto/explicit presets, overrides, invalid tiers, render-scale clamp, `choosePreset` clearing overrides, `describe`, and complete Graphics strings in all nine locales plus `pickLocale`.
 - `server.test.mjs`: time endpoint, static hosting of launch file and assets, session create → command → snapshot → replay, invalid config rejection, AI answering rival seats.
 
 `npm run test:e2e` is the browser playthrough described in §13; `npm run smoke` boots `server.js` on port 8391 and checks the launch file, every client asset, the time API and one session round-trip.
@@ -263,11 +270,11 @@ QA bar (checkable):
 | `sfx/dice-doubles.opus`, `marker-select.opus`, `undo-slide.opus`, `table-open.opus`, `journey-stars.opus` | New cues: doubles, selection, undo, table open, stars | MOSS-SoundEffect v2.0, 100 steps | generated in this pass, wired in `audio.js` and `main.js` with synth fallbacks |
 | `sfx/manifest.txt` / `manifest.json` / `manifest.md` | Canonical table / generator input / generator output | hand-written / tool | shipped, in sync (21 entries each) |
 | 3D models, character animation | — | TRELLIS / Kimodo | not called for: all geometry is procedural and there is no humanoid |
-| `vendor/three.module.min.js` | Renderer | Three.js (MIT) | shipped |
+| `vendor/three.module.min.js`, `vendor/three/addons/` | Renderer and post-processing / environment addons (r160) | Three.js (MIT) | shipped |
 
 ## 16. Known limitations
 
-- No localization: English strings only, no language selection.
+- Localization covers only the Graphics settings section; everything else is English, with no language selection.
 - `server.js` serves every file under the game root, including `tests/` and `tools/`; it does not refuse dotfiles.
 - Hosted daily sessions live in server memory; a restart loses them and the client falls back to a local table.
 - `concede` exists in the rules and the server whitelist but has no UI control; `Leave table` saves a snapshot instead.
@@ -276,11 +283,13 @@ QA bar (checkable):
 - The daily is marked complete only on a win, and "ranked" has no leaderboard behind it.
 - The sharp AI's full-turn search on four-caravan doubles can take a noticeable fraction of a second on slow phones.
 - `Copy replay envelope` needs clipboard permission; without it only the final hash is shown in a toast.
-- The leather grain is a 128 px seeded canvas speckle, not a scanned material.
+- Leather and wood are seeded procedural canvases (512 px at most), not scanned materials.
+- The anti-aliasing `off` tier only removes post-process AA; when no post chain runs, the canvas keeps the browser's multisampling (it is fixed at context creation).
+- The title screen shows the live board faintly behind its panel; there is no separate menu hero scene.
 
 ## Design intent not yet implemented
 
-- Localization into en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT with a string table and language selection from the platform profile/browser.
+- Localization of the remaining UI and content into en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT with a string table and language selection from the platform profile/browser.
 - Platform identity beyond the title-line nickname, presence, activity start/end, cloud-saved progress, leaderboard submission for the daily, and platform-side achievement unlocks.
 - A concede control in the pause dialog.
 - Refusing `tests/`, `tools/` and dotfiles in `server.js`.

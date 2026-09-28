@@ -89,7 +89,7 @@ async function runPass(browser, tag, viewport, hasTouch, base, errors) {
   const page = await context.newPage();
   page.on('pageerror', (e) => errors.push(`[${tag}] pageerror: ${e.message}`));
   page.on('console', (m) => {
-    if (m.type() === 'error' && !browserNoise.test(m.text())) errors.push(`[${tag}] console: ${m.text()}`);
+    if ((m.type() === 'error' || m.type() === 'warning') && !browserNoise.test(m.text())) errors.push(`[${tag}] console ${m.type()}: ${m.text()}`);
   });
   const shot = (stage) => page.screenshot({ path: `/tmp/bearing-board-e2e-${stage}-${tag}.png` });
 
@@ -150,6 +150,48 @@ async function runPass(browser, tag, viewport, hasTouch, base, errors) {
     if (!(await rm.isChecked())) await rm.click(); // faster AI + results; also exercises a control
     await page.selectOption('#s-quality', 'low'); // cheap rendering under swiftshader
     await shot('settings');
+    await page.click('#s-back');
+    await page.waitForSelector('#m-play', { state: 'visible' });
+  });
+
+  await step(`[${tag}] graphics settings: presets, override, persistence`, async () => {
+    const attrs = () => page.evaluate(() => ({
+      preset: document.body.dataset.gfxPreset,
+      bloom: document.querySelector('#bb-canvas').dataset.gfxBloom,
+      summary: document.querySelector('#s-gfx-summary')?.textContent || '',
+    }));
+    await page.click('#m-settings');
+    await page.waitForSelector('#s-gfx-section', { state: 'visible' });
+    await page.locator('#s-quality').scrollIntoViewIfNeeded();
+    // Auto resolves to Low under the software GPU used here.
+    if (!/\(.+\)/.test(await page.locator('#s-quality option[value="auto"]').textContent())) throw new Error('Auto option lacks detected tier');
+    await page.selectOption('#s-quality', 'ultra');
+    await page.waitForTimeout(1500); // post chain + environment build; any console output fails the run
+    if ((await attrs()).preset !== 'ultra') throw new Error('ultra preset not applied');
+    await page.selectOption('#s-quality', 'low');
+    let a = await attrs();
+    if (a.preset !== 'low' || a.bloom !== 'off') throw new Error(`low preset not applied: ${JSON.stringify(a)}`);
+    await page.selectOption('#s-quality', 'high');
+    a = await attrs();
+    if (a.preset !== 'high' || a.bloom !== 'on' || !/bloom/.test(a.summary)) throw new Error(`high preset not applied: ${JSON.stringify(a)}`);
+    await page.locator('#s-gfx-bloom').scrollIntoViewIfNeeded();
+    await page.selectOption('#s-gfx-bloom', 'off'); // one per-category override
+    a = await attrs();
+    if (a.bloom !== 'off' || /bloom/.test(a.summary)) throw new Error(`bloom override not applied: ${JSON.stringify(a)}`);
+    await page.waitForTimeout(600);
+    await shot('graphics');
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForSelector('#m-play', { state: 'visible', timeout: 15000 });
+    a = await attrs();
+    if (a.preset !== 'high' || a.bloom !== 'off') throw new Error(`graphics settings did not survive reload: ${JSON.stringify(a)}`);
+    await page.click('#m-settings');
+    await page.waitForSelector('#s-gfx-section', { state: 'visible' });
+    if ((await page.inputValue('#s-quality')) !== 'high' || (await page.inputValue('#s-gfx-bloom')) !== 'off') {
+      throw new Error('graphics controls do not show the saved values after reload');
+    }
+    // Choosing a preset clears overrides; Low keeps the playthrough cheap under swiftshader.
+    await page.selectOption('#s-quality', 'low');
+    if ((await page.inputValue('#s-gfx-bloom')) !== 'preset') throw new Error('preset change did not clear the bloom override');
     await page.click('#s-back');
     await page.waitForSelector('#m-play', { state: 'visible' });
   });
@@ -338,6 +380,9 @@ try {
   browser = await chromium.launch({
     executablePath: '/usr/bin/google-chrome',
     args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
+    // Headless Chrome must not try to reach a desktop compositor (a stuck WSLg Wayland
+    // socket hangs GPU-process start-up), so display variables are dropped.
+    env: Object.fromEntries(Object.entries(process.env).filter(([k]) => !['WAYLAND_DISPLAY', 'DISPLAY'].includes(k))),
   });
   await runPass(browser, 'desktop', { width: 1280, height: 800 }, false, base, errors);
   if (errors.length) throw new Error('errors after desktop pass:\n' + errors.join('\n'));

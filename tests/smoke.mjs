@@ -36,7 +36,7 @@ try {
   const html = await index.text();
   check('launch file serves HTML', index.ok && html.includes('bb-root'));
 
-  for (const p of ['/js/main.js', '/js/rules.js', '/js/ai.js', '/js/content.js', '/js/audio.js', '/css/main.css', '/vendor/three.module.min.js', '/favicon.svg', '/icon.png', '/starhermit.txt']) {
+  for (const p of ['/js/main.js', '/js/rules.js', '/js/ai.js', '/js/content.js', '/js/audio.js', '/js/gfx.js', '/js/gfx-strings.js', '/js/post.js', '/css/main.css', '/vendor/three.module.min.js', '/vendor/three/addons/postprocessing/EffectComposer.js', '/vendor/three/addons/environments/RoomEnvironment.js', '/favicon.svg', '/icon.png', '/starhermit.txt']) {
     const r = await fetch(`${base}${p}`);
     check(`asset ${p}`, r.ok);
   }
