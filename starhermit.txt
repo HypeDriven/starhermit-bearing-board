@@ -1,4 +1,5 @@
 name=Bearing Board
+description=Roll dice, capture rival markers, and race to bear all your pieces off a classic backgammon-style board.
 launch=index.html
 owner=2712e04e-461b-4d23-81ae-e40b429128a8
 server=server.js
