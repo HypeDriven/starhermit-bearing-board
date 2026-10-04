@@ -13,7 +13,7 @@
 | Session length | Practice duel 10–20 min; lessons 1–3 min; endgame stages 3–6 min; four-caravan circuits up to 25 min |
 | Platforms | Desktop and mobile browsers with WebGL; portrait and landscape |
 | Rendering | Three.js r160 (`vendor/three.module.min.js` + same-revision addons) perspective scene on one canvas, all geometry procedural, optional post-processing; semantic HTML UI layered over it |
-| Offline | Fully playable without the server; the server adds hosted daily tables and time sync |
+| Offline | Fully playable without any server; standalone (no launch token) makes no `/api` or `/ws` request. Signed in, `GET /api/v1/time` syncs the clock |
 
 File map (everything that ships or is run):
 
@@ -113,7 +113,7 @@ Worked example: seat 0 accepted a redouble (cube 4), then bore off its 15th mark
 |---|---|---|---|---|---|
 | Play now | `practiceDef('steady','duel')` with cube | steady | yes / yes | no | One click; `#play` deep link |
 | Continue | Persisted local snapshot (`bb.snapshot.v1`) | as saved | as saved | no | Replays the command log and verifies the hash; damaged saves restart fresh |
-| Daily Crossing | `dailyForDate(todayUTC)` — 30% circuit (2–3 seats), else duel with 50% cube; difficulty and theme seeded | seeded | no / no | yes (flag) | Hosted on the server when `/api/v1/time` answers; otherwise local. Day counted as finished only on a win; countdown to next UTC day in the button |
+| Daily Crossing | `dailyForDate(todayUTC)` — 30% circuit (2–3 seats), else duel with 50% cube; difficulty and theme seeded | seeded | no / no | yes (flag) | Always a local table; the UTC day comes from server time when signed in, else the local clock. Day counted as finished only on a win; countdown to next UTC day in the button |
 | Journey | 40 stages in 5 chapters of 8 (Departure, Open Road, Home Stretch, Brass Stakes, Grand Circuit); every 8th is a Mastery stage with `maxTurns` | casual → steady → sharp | yes / yes | no | All stages open from the start; stars and best turns persist; `Next stage` on results |
 | Learn | 6 lessons with scripted dice and step cards (roll & travel, blots, rail, doubles, bearing off, cube) | casual | yes / yes | no | `Finish lesson` marks it done; `Replay tutorials` in settings clears |
 | Challenges | 8 constrained tables: Sprint (move limit 70), Blitz Clock (4 min thinking), Bare Rail, Sharp Table, High Brass (win at 4+), Clean Hands (≤2 hits taken), Caravan Master (4-seat circuit), Photo Finish (14-turn endgame) | steady/sharp | yes / yes | no | Cleared only when every goal is met |
@@ -131,12 +131,12 @@ Difficulty curve: chapter 1 is full duels vs casual with layouts that teach colu
 | Tap empty board / Esc | Clear selection |
 | Press-and-drag from origin to target | Commit on release (12 px threshold, <600 ms is a tap); with "Tap-to-select" off a failed drop clears the selection |
 | Roll / Offer Stakes / Pass / Undo / Hint / Skip Anim | Tray buttons; disabled unless `legalActions` allows |
-| `R` `U` `H` `C` `Esc` | Roll, undo, hint, camera reset, pause (bindings in `settings.bindings`, letters case-insensitive, never with Ctrl/Meta/Alt) |
+| `R` `U` `H` `C` `Esc` | Roll, undo, hint, camera reset, pause (physical keys via `event.code`; StarHermit control overrides apply when signed in; never with Ctrl/Meta/Alt) |
 | `←` `→` `↑` `↓`, `Enter` | Roving focus across the 26 board-mirror buttons (24 points, rail, off tray); Enter activates |
 | Gamepad | Start pauses, A confirms focused button (or rolls), B clears selection, D-pad left/right roves the mirror |
 | Pause dialog | Resume, Restart table (local only), Settings, Help, Leave table (persists the snapshot) |
 
-Input locking: canvas picks are ignored unless `appPhase === 'game'` and it is a human turn in the move phase; roll-phase and rival-turn taps get an explanatory toast rather than silence. Commands carry unique ids (`makeCmdId`); the hosted server rejects duplicates idempotently. The AI acts on a 650 ms timer (180 ms with reduced motion) and never while paused. Feedback per input: accepted command → `ack` click plus HUD refresh; selection → `select` peel and brass ring; illegal → `invalid` knock, toast, assertive announcement; focus move → `tick`.
+Input locking: canvas picks are ignored unless `appPhase === 'game'` and it is a human turn in the move phase; roll-phase and rival-turn taps get an explanatory toast rather than silence. Commands carry unique ids (`makeCmdId`). The AI acts on a 650 ms timer (180 ms with reduced motion) and never while paused. Feedback per input: accepted command → `ack` click plus HUD refresh; selection → `select` peel and brass ring; illegal → `invalid` knock, toast, assertive announcement; focus move → `tick`.
 
 ## 7. Screens and UI flow
 
@@ -196,7 +196,7 @@ Every logical event routes through `Audio.playEvent(name, seed)`: it plays the m
 | `double` | `stakes-offer.opus` | Brass cube set down firmly | `double` event |
 | `accept` | `stakes-accept.opus` | Brass cube picked up with a ring | `accept` event |
 | `decline` | `stakes-decline.opus` | Brass cube pushed back, dull scrape | `decline` event |
-| `invalid` | `invalid-move.opus` | Muted double knuckle knock | Rejected command, illegal pick, hosted error |
+| `invalid` | `invalid-move.opus` | Muted double knuckle knock | Rejected command, illegal pick |
 | `noMoves` | `no-moves.opus` | Leather sigh and one low tap | `noMoves` event |
 | `turn` | `turn-change.opus` | Quiet wooden tick | `turn` event |
 | `tableOpen` | `table-open.opus` | Clasp click, leather creak, halves laid flat, cup set down | `launchSession()` |
@@ -225,23 +225,33 @@ Shipped language: English (`<html lang="en">`), except the Graphics settings sec
 
 Conventions from https://wiki.starhermit.com/ used today:
 - **Manifest:** `starhermit.txt` with `name=Bearing Board`, `launch=index.html`, `owner=<uuid>`, `server=server.js`, `version=1.0.0`, `contentVersion=1`, `cover=coverart.png`.
-- **Server script:** `server.js` serves the distribution and a same-origin `/api/v1` implemented with the shared `rules.js`: `GET time` (round-trip-adjusted offset in `platform.init`, used for the daily's UTC day and countdown), `POST sessions` (validated config → authoritative table), `GET sessions/:id` (reconnect snapshot; the client shows "While you were away: N table events"), `POST sessions/:id/commands` (seat 0 only, short unique `id`, type whitelist, 8 KB body cap, 60 requests / 10 s per address, duplicate ids answered idempotently, AI seats played out server-side), `GET sessions/:id/replay` (envelope with hashes). Sessions are in-memory, capped at 500 by last touch.
-- **Launch token** (`platform` in `js/main.js`): read from the URL fragment `#game_token=<jwt>` (optional `&session_id=`, stripped after the read; query `?token=`/`?launch_token=` kept for local dev), decoded for `sub` + `game_scope` (never hard-coded), sent as `Authorization: Bearer` on every `api/v1` call, re-minted every 45 min via `POST /api/v1/games/{slug}/launch-token` (60 s retry on failure). The profile nickname from `GET /api/v1/users/{sub}/profile` (never `/api/v1/me`, never usernames; `Player <id8>` fallback) replaces the local guest name on the title line when hosted. On the platform the game's own session routes only exist if the declared backend runs in front of them; otherwise the daily start falls back to a local table with a toast, with no console errors. No tokens are persisted.
-- **Not used:** presence heartbeats, activity start/end, cloud saves (progress is a checksummed `localStorage` document), leaderboards, platform achievements (unlocks are local only), invitations, matchmaking, chat, voice, WebSocket events. The daily's `ranked: true` flag is informational; no score is submitted anywhere.
+- **Server script:** `server.js` serves the distribution and a same-origin `/api/v1` implemented with the shared `rules.js`: `GET time` (the only route the client calls, and only when signed in: round-trip-adjusted offset in `platform.init`, used for the daily's UTC day and countdown), and — exercised only by the server tests, not called by the client — `POST sessions` (validated config → authoritative table), `GET sessions/:id` (reconnect snapshot; the client shows "While you were away: N table events"), `POST sessions/:id/commands` (seat 0 only, short unique `id`, type whitelist, 8 KB body cap, 60 requests / 10 s per address, duplicate ids answered idempotently, AI seats played out server-side), `GET sessions/:id/replay` (envelope with hashes). Sessions are in-memory, capped at 500 by last touch.
+- **SDK:** `starhermit-sdk.js` (verbatim copy of the canonical client) loads as a classic script before `js/main.js`, which calls `StarHermit.init()` first thing; `js/account.js` (`createAccount`) wraps the account calls and `platform` in `js/main.js` wires them to the UI. Without a token no StarHermit request is made.
+- **Launch token and renewal:** the SDK reads `#game_token=<jwt>[&session_id=]` or a sign-in return `#access_token=…`, strips it, takes the slug from `game_scope` (never hard-coded) and renews via `POST /api/v1/games/{slug}/launch-token`. The token also rides as `Authorization: Bearer` on `GET api/v1/time`. If renewal is refused the player sees "Signed out of StarHermit — progress stays on this device." and keeps playing locally. No tokens are persisted.
+- **Sign-in:** on `*.starhermit.com` without a token the title menu shows **Sign in with StarHermit** (`StarHermit.signIn()`); hidden when signed in and locally.
+- **Identity:** the profile nickname from `GET /api/v1/users/{sub}/profile` (never `/api/v1/me`; `Player <id>` fallback) replaces the local guest name on the title line.
+- **Cloud save:** the progress document (`{ data, check }`, the same checksummed shape as `bb.progress.v1`) mirrors to `/api/v1/me/cloud-saves/game:{slug}`. On start a valid remote copy wins over the local one; otherwise the local copy seeds the slot. Every `saveProgress` queues a debounced upload, flushed on `pagehide`/hidden. Settings, snapshots and the daily session id stay local.
+- **Settings KV:** every `saveSettings` sends the changed keys (audio, volumes, graphics, theme, reduced motion, contrast, text size, handedness, haptics, tap-to-select, timing assistance, guest name) with `PATCH /api/v1/games/{slug}/settings`; on start the platform's values override local ones.
+- **Invite:** when signed in the title menu shows **Invite a friend**, which copies `StarHermit.inviteLink()` and confirms with a toast (the link is shown when the clipboard is blocked).
+- **Controls:** `starhermit.txt` declares `control.roll`, `undo`, `hint`, `pause`, `cameraReset`, `prev`, `next`; keydown routes by `event.code` through `StarHermit.loadBindings` (defaults standalone), and Settings → Keyboard bindings lists the effective keys.
+- **Strings:** sign-in, invite, toast and sign-out texts exist in all nine locales (`ACCOUNT_STRINGS` in `js/gfx-strings.js`).
+- On the platform the game's own session routes only exist if the declared backend runs in front of them; otherwise the daily start falls back to a local table with a toast, with no console errors.
+- **Not used:** StarHermit achievements and leaderboards (`server.js` is an HTTP host, not a platform script reporting `scores`/`achievements`; unlocks stay local), platform sessions/matchmaking/invites/chat/replays, the `server.js` session routes, avatars (no player chip), presence, voice, WebSocket events. The daily's `ranked: true` flag is informational; no score is submitted anywhere.
 
 ## 13. Technical architecture
 
-- **Rules boundary.** `main.js` never mutates rules state; it calls `Rules.applyCommand` (local transport) or posts the command and adopts the server snapshot (hosted). Rendering (`createRenderer.sync`) consumes the immutable state plus the event list for tweens.
+- **Rules boundary.** `main.js` never mutates rules state; it calls `Rules.applyCommand`. Rendering (`createRenderer.sync`) consumes the immutable state plus the event list for tweens.
 - **Session controller** (`Session`): command log, undo snapshots (max 40), thinking clock (seat 0 only), tutorial step matcher, AI scheduler, persistence, replay envelope, outcome application (achievements, stars, progress).
-- **Persistence keys:** `bb.settings.v1`, `bb.progress.v1` (`{data, check}` FNV checksum; rejected if it does not verify), `bb.snapshot.v1` (cfg + log + hash + def, cleared on finish), `bb.dailySession.v1` (hosted session pointer), `bb.funnel.v1` (anonymous local funnel events: boot, start, tutorial step, round end, retry, undo, settings change, quit, error category; capped at 200). Storage falls back to an in-memory map when `localStorage` is unavailable.
+- **Persistence keys:** `bb.settings.v1`, `bb.progress.v1` (`{data, check}` FNV checksum; rejected if it does not verify), `bb.snapshot.v1` (cfg + log + hash + def, cleared on finish), `bb.funnel.v1` (anonymous local funnel events: boot, start, tutorial step, round end, retry, undo, settings change, quit, error category; capped at 200). Storage falls back to an in-memory map when `localStorage` is unavailable.
 - **Determinism:** three seeded streams — rules (`seed ^ STREAM_RULES`), audio (`sfx:<event>:<seed>`, `music:<seed>`), particles (position + time). `tests/replay.test.mjs` proves identical hashes for identical seed + commands across 30 games.
 - **Renderer layers:** environment 0, gameplay 1 (the only raycast layer; invisible box volumes per point, rail and off trays), selection 2, effects 3 (particles have a no-op `raycast`). Context loss rebuilds GPU resources from theme + last state.
 - **Quality model:** see **Graphics** in §8. `createRenderer` exposes `setGraphics(saved)` (idempotent per settings JSON; resizes/enables the shadow map and recompiles lit materials, rebuilds board and markers when the detail tier changes, swaps the environment, re-keys the post chain) and `graphicsInfo()` (GPU, detected preset, resolved tiers, pixels, fps, adaptive scale, post failure). The old `quality` setting migrates once (`medium` → Balanced). The canvas is created with MSAA; the composer's half-float target uses 4× MSAA for the `msaa` tier. Hidden tabs stop the RAF loop. Draw calls stay under ~200 (points merged into three meshes, hit volumes, ≤ 46 markers with rings, frame, trays, particles).
-- **E2E drive.** `tests/e2e.mjs` starts its own static server on an ephemeral port (answering `/api/v1/*` with `{}` so the offline path is taken), launches headless Chrome with SwiftShader, and plays a complete practice duel at 1280×800 and 390×844 (touch) purely through visible DOM: title `Play now`, settings (reduced motion, low quality), the Graphics section (Ultra, Low, High, a bloom override, reload persistence, preset clears overrides), `Roll`, arrow-key roving focus + `Enter` on mirror buttons, `Pass`, `Hint`, `Undo`, pause → settings → resume, cube `Accept`, then verifies the results table and returns to the menu; any console error, console warning or page error fails the run. Chrome is launched without `DISPLAY`/`WAYLAND_DISPLAY` so a stuck desktop compositor cannot hang GPU start-up.
+- **E2E drive.** `tests/e2e.mjs` starts its own static server on an ephemeral port (404 for `/api*` and `/ws*`; any such request fails the run), launches headless Chrome with SwiftShader, and plays a complete practice duel at 1280×800 and 390×844 (touch) purely through visible DOM: title `Play now`, settings (reduced motion, low quality), the Graphics section (Ultra, Low, High, a bloom override, reload persistence, preset clears overrides), `Roll`, arrow-key roving focus + `Enter` on mirror buttons, `Pass`, `Hint`, `Undo`, pause → settings → resume, cube `Accept`, then verifies the results table and returns to the menu; any console error, console warning or page error fails the run. Chrome is launched without `DISPLAY`/`WAYLAND_DISPLAY` so a stuck desktop compositor cannot hang GPU start-up.
 
 ## 14. Testing and acceptance criteria
 
-`npm test` (`node --test tests/*.test.mjs`, 45 tests, no dependencies):
+`npm test` (`node --test tests/*.test.mjs`, 49 tests, no dependencies):
+- `platform.test.mjs`: the SDK in a sandbox with a stubbed `fetch` drives `js/account.js` — no requests standalone; token read and fragment stripped; nickname; settings patch of changed keys; cloud-save round trip through `game:<slug>`; control overrides; invite link; sign-out on refused renewal; account strings in all nine locales.
 - `rules.test.mjs`: layouts, validation messages, doubles, hits, rail priority, higher-die rule, bear-off gates, win breakdown, gammon/backgammon factors, cube offer/accept/ownership/decline payout, pass legality, out-of-turn and malformed commands, concede in duel and circuit, move-limit tiebreak, serialization round-trip, marker conservation, circuit direction, layout helper.
 - `replay.test.mjs`: 30-game hash reproducibility, AI-vs-AI termination bound, malformed-command fuzzing, hash divergence across seeds, envelope invariants.
 - `content.test.mjs`: every lesson/stage/challenge/daily passes `validateContent`; counts (6/40/8/5); sampled tables terminate under the steady AI; daily determinism; achievement key format; practice constraints; stable journey seeds; scripted dice stay legal.
@@ -274,9 +284,8 @@ QA bar (checkable):
 
 ## 16. Known limitations
 
-- Localization covers only the Graphics settings section; everything else is English, with no language selection.
+- Localization covers only the Graphics settings section and the StarHermit account strings; everything else is English, with no language selection.
 - `server.js` serves every file under the game root, including `tests/` and `tools/`; it does not refuse dotfiles.
-- Hosted daily sessions live in server memory; a restart loses them and the client falls back to a local table.
 - `concede` exists in the rules and the server whitelist but has no UI control; `Leave table` saves a snapshot instead.
 - The thinking clock and Blitz goal only track seat 0; in pass-and-play the second human's time is not measured and hints/undo act for whichever human seat is active.
 - Stacks above five markers show a lifted top disc but no count on the canvas; the exact count is only in the rail rows and the board mirror.
@@ -290,7 +299,7 @@ QA bar (checkable):
 ## Design intent not yet implemented
 
 - Localization of the remaining UI and content into en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT with a string table and language selection from the platform profile/browser.
-- Platform identity beyond the title-line nickname, presence, activity start/end, cloud-saved progress, leaderboard submission for the daily, and platform-side achievement unlocks.
+- Presence, activity start/end, leaderboard submission for the daily, and platform-side achievement unlocks.
 - A concede control in the pause dialog.
 - Refusing `tests/`, `tools/` and dotfiles in `server.js`.
 - A rendered brass stakes cube on the board (currently a HUD badge).

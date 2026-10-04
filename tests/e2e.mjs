@@ -51,16 +51,15 @@ const MIME = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
+const ownServerHits = [];
 function startServer() {
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
-      // Platform API probe: answer with a non-time payload so the game takes
-      // its documented offline path (platform.available stays false) without
-      // producing 404 console noise.
-      if (url.pathname.startsWith('/api/v1/')) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end('{}');
+      // Plain static host: a standalone load must never call own-server routes.
+      if (url.pathname.startsWith('/api') || url.pathname.startsWith('/ws')) {
+        ownServerHits.push(url.pathname);
+        res.writeHead(404); res.end();
         return;
       }
       let path = normalize(decodeURIComponent(url.pathname));
@@ -388,6 +387,7 @@ try {
   if (errors.length) throw new Error('errors after desktop pass:\n' + errors.join('\n'));
   await runPass(browser, 'mobile', { width: 390, height: 844 }, true, base, errors);
   if (errors.length) throw new Error('page errors:\n' + errors.join('\n'));
+  if (ownServerHits.length) throw new Error('own-server requests while standalone: ' + ownServerHits.join(', '));
   console.log('\nE2E PASS — bearing-board, desktop + mobile, no page errors');
 } finally {
   await browser?.close();

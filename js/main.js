@@ -7,8 +7,7 @@
 //   content.js — versioned lessons/journey/daily/practice/challenge content
 //   audio.js   — procedural buses; every cue has a visual/DOM twin
 //   main.js    — session + render + ui + platform glue in this file.
-// Rules state changes ONLY through Rules.applyCommand / the hosted session
-// API. Rendering consumes immutable snapshots plus interpolation tweens.
+// Rules state changes ONLY through Rules.applyCommand. Rendering consumes immutable snapshots plus interpolation tweens.
 
 import * as THREE from '../vendor/three.module.min.js';
 import * as Rules from './rules.js';
@@ -16,13 +15,19 @@ import * as Content from './content.js';
 import * as AI from './ai.js';
 import * as Audio from './audio.js';
 import * as Gfx from './gfx.js';
-import { gfxStrings, pickLocale } from './gfx-strings.js';
+import { gfxStrings, pickLocale, accountStrings } from './gfx-strings.js';
+import { createAccount } from './account.js';
+
+// StarHermit SDK (starhermit-sdk.js, classic script loaded first): read the
+// launch fragment before anything else looks at the URL.
+const SH = window.StarHermit;
+SH.init();
+const account = createAccount(SH);
 
 const BUILD_VERSION = '1.0.0';
 const STORE_SETTINGS = 'bb.settings.v1';
 const STORE_PROGRESS = 'bb.progress.v1';
 const STORE_SNAPSHOT = 'bb.snapshot.v1';
-const STORE_DAILY = 'bb.dailySession.v1';
 const STORE_FUNNEL = 'bb.funnel.v1';
 
 // ---------------------------------------------------------------------------
@@ -81,10 +86,6 @@ const DEFAULT_SETTINGS = {
   haptics: true,
   toggleSelect: true,         // tap-tap selection vs press-and-hold drag
   timingAssist: 1,            // 1 | 1.5 | 2 multiplier for timed challenges
-  bindings: {                 // desktop action bindings (declared defaults)
-    roll: 'r', undo: 'u', hint: 'h', pause: 'Escape', cameraReset: 'c',
-    confirm: 'Enter', cancel: 'Escape', prev: 'ArrowLeft', next: 'ArrowRight',
-  },
   profile: { name: 'Guest Traveler' },
 };
 
@@ -92,7 +93,7 @@ let settings = (() => {
   const loaded = readJSON(STORE_SETTINGS, {});
   const merged = { ...DEFAULT_SETTINGS, ...loaded };
   merged.volume = { ...DEFAULT_SETTINGS.volume, ...(loaded.volume || {}) };
-  merged.bindings = { ...DEFAULT_SETTINGS.bindings, ...(loaded.bindings || {}) };
+  delete merged.bindings; // keyboard bindings now come from StarHermit controls (KEY_DEFAULTS)
   merged.profile = { ...DEFAULT_SETTINGS.profile, ...(loaded.profile || {}) };
   merged.graphics = { ...Gfx.DEFAULT_GRAPHICS, ...(loaded.graphics || {}) };
   // Migrate the old single quality tier (auto | low | medium | high) once.
@@ -107,7 +108,23 @@ let settings = (() => {
   return merged;
 })();
 
-function saveSettings() { writeJSON(STORE_SETTINGS, settings); }
+function saveSettings() { writeJSON(STORE_SETTINGS, settings); platform.mirrorSettings(settings); }
+
+// Keyboard actions by KeyboardEvent.code (control.* in starhermit.txt); a
+// signed-in player's StarHermit overrides replace these at boot.
+const KEY_DEFAULTS = {
+  roll: ['KeyR'], undo: ['KeyU'], hint: ['KeyH'], pause: ['Escape'], cameraReset: ['KeyC'],
+  prev: ['ArrowLeft', 'ArrowUp'], next: ['ArrowRight', 'ArrowDown'],
+};
+let keyBindings = structuredClone(KEY_DEFAULTS);
+function actionForCode(code) {
+  for (const a in keyBindings) if (keyBindings[a].includes(code)) return a;
+  return null;
+}
+function keyLabel(action) {
+  const names = { Escape: 'Esc', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Space: 'Space' };
+  return (keyBindings[action] || []).map((c) => names[c] || c.replace(/^Key/, '').replace(/^Digit/, '')).join('/');
+}
 
 function applySettings() {
   const b = document.body;
@@ -153,6 +170,7 @@ let progress = loadProgress();
 
 function saveProgress() {
   writeJSON(STORE_PROGRESS, { data: progress, check: checksum(progress) });
+  platform.saveCloud();
 }
 
 function unlockAchievement(key) {
@@ -238,136 +256,75 @@ function fmtClock(ms) {
 }
 
 // ---------------------------------------------------------------------------
-// Platform: launch-token read (URL fragment, stripped after the read), JWT
-// sub/game_scope decode, Bearer auth on every /api call, 45-min token
-// refresh, profile nickname for the title line, plus same-origin /api
-// detection + server-time synchronization (round-trip adjusted). Offline
-// start works fully without the API. No tokens in storage — memory only.
+// Platform: StarHermit account (via account.js / the SDK) and, only when
+// signed in, server-time sync via GET api/v1/time (round-trip adjusted).
+// Standalone uses the local clock and makes no own-server request.
 // ---------------------------------------------------------------------------
 
+const ACCOUNT = accountStrings(pickLocale(typeof navigator !== 'undefined' ? navigator.languages || [navigator.language] : []));
+
 const platform = {
-  available: false,
   timeOffsetMs: 0,
-  token: null,        // launch token, memory only
-  userId: null,       // JWT sub
-  slug: null,         // JWT game_scope
-  profileName: null,  // account nickname when hosted
-  _refreshTimer: null,
-  _retryTimer: null,
-
-  // Fragment first (the platform contract: #game_token=<jwt>[&session_id=]);
-  // query forms are kept for local development only.
-  readLaunchToken() {
-    try {
-      const h = new URLSearchParams(String(location.hash || '').replace(/^#/, ''));
-      const t = h.get('game_token');
-      if (t) {
-        h.delete('game_token');
-        h.delete('session_id');
-        const rest = h.toString();
-        history.replaceState(null, '', location.pathname + location.search + (rest ? '#' + rest : ''));
-        return t;
-      }
-      const q = new URLSearchParams(location.search);
-      return q.get('game_token') || q.get('token') || q.get('launch_token') || null;
-    } catch (_) { return null; }
-  },
-
-  decodeJwt(t) {
-    try {
-      const seg = String(t).split('.')[1];
-      if (!seg) return null;
-      let b64 = seg.replace(/-/g, '+').replace(/_/g, '/');
-      b64 += '='.repeat((4 - (b64.length % 4)) % 4);
-      const bin = atob(b64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      return JSON.parse(new TextDecoder().decode(bytes));
-    } catch (_) { return null; }
-  },
+  profileName: null,  // account nickname when signed in
 
   async init() {
-    this.token = this.readLaunchToken();
-    if (this.token) {
-      const claims = this.decodeJwt(this.token);
-      if (!claims) this.token = null;
-      else {
-        if (typeof claims.sub === 'string' && claims.sub) this.userId = claims.sub;
-        if (typeof claims.game_scope === 'string' && claims.game_scope) this.slug = claims.game_scope;
-        if (!this.userId || !this.slug) this.token = null; // not a usable launch token
-      }
-    }
-    if (this.token) {
-      this._scheduleRefresh();
-      this._fetchProfile(); // nickname lands async; the title re-renders when it does
-    }
+    account.onAuth((a) => {
+      if (a.signedIn) return;
+      this.profileName = null;
+      account.reset();
+      toast(ACCOUNT.signedOut);
+      if (appPhase === 'title') showTitle();
+    });
+    if (!account.signedIn) return; // standalone: local clock, no request
+    await this._initAccount();
     try {
       const t0 = Date.now();
-      const res = await fetch('api/v1/time', { cache: 'no-store' });
+      const res = await fetch('api/v1/time', { cache: 'no-store', headers: SH.token ? { Authorization: `Bearer ${SH.token}` } : {} });
       const t1 = Date.now();
       if (!res.ok) return;
       const body = await res.json();
       if (typeof body.epochMs !== 'number') return;
       const rtt = t1 - t0;
       this.timeOffsetMs = body.epochMs - (t0 + rtt / 2);
-      this.available = true;
-    } catch (_) { this.available = false; }
+    } catch (_) { /* keep the local clock */ }
   },
 
-  // The token lives 60 min; scoped tokens may re-mint via the game's
-  // launch-token route. Retry a failed re-mint after ~60 s.
-  _scheduleRefresh() {
-    if (this._refreshTimer) clearInterval(this._refreshTimer);
-    this._refreshTimer = setInterval(() => this._refreshToken(), 45 * 60 * 1000);
-  },
-  _refreshToken() {
-    if (!this.token || !this.slug) return;
-    this.api(`games/${encodeURIComponent(this.slug)}/launch-token`, { method: 'POST', body: '{}' })
-      .then((body) => {
-        if (body && typeof body.token === 'string' && body.token) {
-          this.token = body.token;
-          const claims = this.decodeJwt(this.token);
-          if (claims && claims.sub) this.userId = claims.sub;
-          if (claims && claims.game_scope) this.slug = claims.game_scope;
-        } else {
-          this._retryRefresh();
-        }
-      })
-      .catch(() => this._retryRefresh());
-  },
-  _retryRefresh() {
-    if (this._retryTimer || !this.token) return;
-    this._retryTimer = setTimeout(() => { this._retryTimer = null; this._refreshToken(); }, 60000);
+  // StarHermit account: nickname, remote-first cloud save, settings KV, bindings.
+  async _initAccount() {
+    const r = await account.start(KEY_DEFAULTS);
+    if (!r) return;
+    r.profile.then((p) => {
+      if (!p) return;
+      this.profileName = String(p.displayName).slice(0, 40);
+      if (appPhase === 'title') showTitle();
+    });
+    const remote = r.remote;
+    if (remote && remote.data && remote.check === checksum(remote.data)) {
+      progress = { ...structuredClone(DEFAULT_PROGRESS), ...remote.data };
+      writeJSON(STORE_PROGRESS, { data: progress, check: checksum(progress) });
+    } else this.saveCloud(); // no remote copy yet: seed it from this device
+    let changed = false;
+    for (const k of Object.keys(DEFAULT_SETTINGS)) if (k in r.settings) { settings[k] = r.settings[k]; changed = true; }
+    if (changed) { writeJSON(STORE_SETTINGS, settings); applySettings(); }
+    account.mirrorSettings(settings); // seed keys the platform does not have yet
+    keyBindings = r.bindings;
+    window.addEventListener('pagehide', () => account.flush());
+    document.addEventListener('visibilitychange', () => { if (document.hidden) account.flush(); });
   },
 
-  // Display name for the title line: the profile nickname is the only
-  // profile read a game-scoped token may make (never /api/v1/me, never the
-  // raw username). Falls back to a neutral shortened id.
-  async _fetchProfile() {
-    if (!this.userId) return;
-    try {
-      const r = await this.api(`users/${encodeURIComponent(this.userId)}/profile`);
-      const name = r && typeof r.nickname === 'string' && r.nickname ? r.nickname : null;
-      this.profileName = (name || ('Player ' + this.userId.slice(0, 8))).slice(0, 40);
-    } catch (_) {
-      this.profileName = 'Player ' + this.userId.slice(0, 8);
-    }
-    if (appPhase === 'title') showTitle();
+  saveCloud() { account.saveCloud({ data: progress, check: checksum(progress) }); },
+  mirrorSettings(s) { account.mirrorSettings(s); },
+
+  async copyInvite() {
+    const link = account.inviteLink();
+    if (!link) return;
+    try { await navigator.clipboard.writeText(link); toast(ACCOUNT.inviteCopied); }
+    catch (_) { toast(`${ACCOUNT.inviteFailed} ${link}`, 6000); }
   },
 
   now() { return new Date(Date.now() + this.timeOffsetMs); },
   todayUTC() { return Content.todayUTC(this.now()); },
-  async api(path, opts = {}) {
-    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
-    if (this.token) headers.Authorization = `Bearer ${this.token}`;
-    const res = await fetch(`api/v1/${path}`, { ...opts, headers });
-    let body = null;
-    try { body = await res.json(); } catch (_) {}
-    if (res.status === 429) throw new Error('The table is busy — try again in a moment.');
-    if (!res.ok) throw new Error(body?.error || `Request failed (${res.status})`);
-    return body;
-  },
-  get tokenHosted() { return !!this.token; },
+  get tokenHosted() { return account.signedIn; },
 };
 
 // ---------------------------------------------------------------------------
@@ -420,9 +377,7 @@ function offPos(players, p, idx) {
 
 // ---------------------------------------------------------------------------
 // Session controller — owns one table from preparing → active → results.
-// Local transport applies commands in-process; hosted transport posts them to
-// the authoritative server and adopts the returned snapshots. In both cases
-// the human only ever speaks in commands; state is rebuilt from snapshots.
+// Commands are applied in-process; the human only ever speaks in commands.
 // ---------------------------------------------------------------------------
 
 const AI_THINK_MS = 650;
@@ -431,8 +386,6 @@ class Session {
   constructor(def, opts = {}) {
     this.def = def;
     this.cfg = defToConfig(def);
-    this.transport = opts.transport || 'local';
-    this.sessionId = opts.sessionId || null;
     this.humanSeats = new Set(opts.humanSeats || [0]);
     this.aiDifficulty = def.ai?.difficulty || 'steady';
     this.state = null;
@@ -480,7 +433,7 @@ class Session {
 
   // Undo checkpoint: a human decision point (their roll phase or cube answer).
   pushSnapshot() {
-    if (!this.def.mechanics?.undo || this.transport !== 'local') return;
+    if (!this.def.mechanics?.undo) return;
     if (!this.isHumanTurn() || this.state.phase !== 'roll') return;
     this.snapshots.push({
       stateJSON: Rules.serialize(this.state),
@@ -491,7 +444,7 @@ class Session {
   }
 
   canUndo() {
-    return this.def.mechanics?.undo === true && this.transport === 'local' &&
+    return this.def.mechanics?.undo === true &&
       this.snapshots.length > 1 && !this.over;
   }
 
@@ -524,7 +477,6 @@ class Session {
     if (this.over || this.paused) return { ok: false };
     cmd.id = cmd.id || Rules.makeCmdId('bb');
     this.stopThinking();
-    if (this.transport === 'hosted') return this.dispatchHosted(cmd);
     const r = Rules.applyCommand(this.state, cmd);
     if (!r.ok) {
       const reason = r.events[0]?.reason || 'illegal action';
@@ -538,25 +490,6 @@ class Session {
     this.log.push(cmd);
     this.afterCommands(r.events);
     return { ok: true, events: r.events };
-  }
-
-  async dispatchHosted(cmd) {
-    try {
-      const body = await platform.api(`sessions/${this.sessionId}/commands`, {
-        method: 'POST',
-        body: JSON.stringify({ cmd }),
-      });
-      const newEvents = body.events || [];
-      this.state = body.state;
-      this.log = body.log || this.log;
-      this.afterCommands(newEvents);
-      return { ok: true, events: newEvents };
-    } catch (err) {
-      Audio.playEvent('invalid');
-      toast(`Table error: ${err.message}`);
-      announce(`Table error: ${err.message}`, true);
-      return { ok: false, reason: err.message };
-    }
   }
 
   afterCommands(events) {
@@ -603,7 +536,7 @@ class Session {
   }
 
   // Pause: freeze solo simulation and AI scheduling (spec: backgrounding
-  // pauses solo play; hosted tables are read-only until the snapshot refresh).
+  // pauses solo play).
   pause() {
     this.paused = true;
     clearTimeout(this.aiTimer);
@@ -619,7 +552,7 @@ class Session {
 
   scheduleAI(delay = AI_THINK_MS) {
     clearTimeout(this.aiTimer);
-    if (this.over || this.paused || this.transport !== 'local') return;
+    if (this.over || this.paused) return;
     if (this.isHumanTurn()) return;
     const ms = settings.reducedMotion ? 180 : delay;
     this.aiTimer = setTimeout(() => this.aiStep(), ms);
@@ -640,7 +573,7 @@ class Session {
   }
 
   persistSnapshot() {
-    if (this.transport !== 'local' || this.over) return;
+    if (this.over) return;
     writeJSON(STORE_SNAPSHOT, {
       version: 1,
       cfg: this.cfg,
@@ -2069,7 +2002,7 @@ function updateHUD() {
   $('#bb-rail-progress').innerHTML =
     `<p class="bb-pip">Turn ${st.turnNum} · strikes ${st.stats.hits[0]} · borne off ${st.off[0]}/${Rules.RULESETS[st.cfg.ruleset].markers}</p>`;
   $('#bb-rail-status').innerHTML =
-    `<p>${session.transport === 'hosted' ? 'Hosted table — server authoritative.' : 'Local table.'}</p>
+    `<p>Local table.</p>
      <p class="bb-pip">Seed ${st.cfg.seed} · v${Rules.RULES_VERSION}</p>`;
 
   // Action buttons
@@ -2081,11 +2014,6 @@ function updateHUD() {
   $('#bb-btn-undo').disabled = !session.canUndo();
   $('#bb-btn-hint').disabled = !(def.mechanics?.hint && humanTurn);
   $('#bb-btn-roll').textContent = st.phase === 'roll' ? 'Roll' : 'Roll';
-
-  // Hosted daily: keep the reconnect pointer fresh.
-  if (session.transport === 'hosted' && session.def.kind === 'daily') {
-    writeJSON(STORE_DAILY, { sessionId: session.sessionId, day: platform.todayUTC(), tick: st.tick });
-  }
 }
 
 // --- cube overlay -----------------------------------------------------------
@@ -2251,12 +2179,11 @@ function initKeyboard() {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
     // Never shadow browser/OS chords (Ctrl+R reload, Cmd+H hide, …).
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    const b = settings.bindings;
-    // Letter bindings are case-insensitive so Shift/Caps Lock still play.
-    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    // Routed by physical key (event.code) through the effective bindings.
+    const act = actionForCode(e.code);
     const modalOpen = !$('#bb-pause-overlay').hidden || !$('#bb-cube-overlay').hidden;
 
-    if (key === b.pause || (key === 'Escape' && !modalOpen)) {
+    if (act === 'pause' || (e.code === 'Escape' && !modalOpen)) {
       if (appPhase === 'game' && !session?.over) {
         e.preventDefault();
         togglePause();
@@ -2265,21 +2192,21 @@ function initKeyboard() {
     }
     if (appPhase !== 'game' || !session || modalOpen) return;
 
-    if (key === b.roll && !$('#bb-btn-roll').disabled) { e.preventDefault(); doCommand({ type: 'roll', player: session.state.active }); }
-    else if (key === b.undo && !$('#bb-btn-undo').disabled) { e.preventDefault(); undoMove(); }
-    else if (key === b.hint && !$('#bb-btn-hint').disabled) { e.preventDefault(); session.hint(); }
-    else if (key === b.cameraReset) { e.preventDefault(); rendererApi.resize(); announce('Camera reset.'); }
-    else if (key === b.next || key === b.prev || key === 'ArrowUp' || key === 'ArrowDown') {
+    if (act === 'roll' && !$('#bb-btn-roll').disabled) { e.preventDefault(); doCommand({ type: 'roll', player: session.state.active }); }
+    else if (act === 'undo' && !$('#bb-btn-undo').disabled) { e.preventDefault(); undoMove(); }
+    else if (act === 'hint' && !$('#bb-btn-hint').disabled) { e.preventDefault(); session.hint(); }
+    else if (act === 'cameraReset') { e.preventDefault(); rendererApi.resize(); announce('Camera reset.'); }
+    else if (act === 'next' || act === 'prev') {
       // Roving focus across the board mirror buttons.
       const btns = [...document.querySelectorAll('#bb-board-mirror button')];
       if (!btns.length) return;
       e.preventDefault();
       const cur = btns.indexOf(document.activeElement);
-      const dir = (key === b.next || key === 'ArrowDown') ? 1 : -1;
+      const dir = act === 'next' ? 1 : -1;
       const next = btns[(cur + dir + btns.length) % btns.length] || btns[0];
       next.focus();
       Audio.playEvent('tick');
-    } else if (key === 'Escape' && selection) {
+    } else if (e.code === 'Escape' && selection) {
       clearSelectionUI();
       announce('Selection cleared.');
     }
@@ -2376,7 +2303,6 @@ function togglePause() {
   if (!session || session.over) return;
   if (overlay.hidden) {
     session.pause();
-    $('#bb-btn-restart').disabled = session.transport === 'hosted';
     overlay.hidden = false;
     announce('Game paused.');
     $('#bb-btn-resume').focus();
@@ -2442,8 +2368,6 @@ function showTitle() {
   const dailyDone = progress.daily.days.includes(platform.todayUTC());
   const achCount = Object.keys(progress.achievements).length;
   const journeyDone = Object.keys(progress.journey).length;
-  const dailyStored = readJSON(STORE_DAILY, null);
-  const canResumeDaily = dailyStored && dailyStored.day === platform.todayUTC() && platform.available && !dailyDone;
 
   setScreen(`
     <div class="bb-title-block">
@@ -2455,13 +2379,15 @@ function showTitle() {
     <nav class="bb-menu" aria-label="Main menu">
       ${snap ? `<button class="bb-btn bb-btn-primary" id="m-continue">Continue — ${esc(snap.def?.name || snap.defId || 'saved table')}</button>` : ''}
       <button class="bb-btn bb-btn-primary" id="m-play">Play now</button>
-      <button class="bb-btn" id="m-daily">${canResumeDaily ? 'Resume ' : ''}Daily Crossing <span class="bb-tile-sub" id="daily-count"></span></button>
+      <button class="bb-btn" id="m-daily">Daily Crossing <span class="bb-tile-sub" id="daily-count"></span></button>
       <button class="bb-btn" id="m-journey">Journey — ${journeyDone}/${Content.JOURNEY.length} stages</button>
       <button class="bb-btn" id="m-learn">Learn</button>
       <button class="bb-btn" id="m-challenges">Challenges</button>
       <button class="bb-btn" id="m-practice">Practice setup</button>
       <button class="bb-btn" id="m-settings">Settings</button>
       <button class="bb-btn" id="m-help">Help &amp; rules</button>
+      ${account.signedIn ? `<button class="bb-btn" id="m-invite">${esc(ACCOUNT.invite)}</button>` : ''}
+      ${account.canSignIn() ? `<button class="bb-btn" id="m-sign-in">${esc(ACCOUNT.signIn)}</button>` : ''}
     </nav>
     <section class="bb-section">
       <h2>Today’s table ${dailyDone ? '<span class="bb-badge bb-on">finished</span>' : ''}</h2>
@@ -2479,6 +2405,8 @@ function showTitle() {
   wire('#m-practice', () => showSetup());
   wire('#m-settings', () => showSettings('title'));
   wire('#m-help', () => showHelp('title'));
+  wire('#m-invite', () => platform.copyInvite());
+  wire('#m-sign-in', () => account.signIn());
   $('#m-play')?.focus();
   updateDailyCountdown();
 }
@@ -2638,34 +2566,8 @@ function showSetup() {
 
 // --- daily ------------------------------------------------------------------------
 
-async function startDaily() {
-  const def = Content.dailyForDate(platform.todayUTC());
-  if (platform.available) {
-    try {
-      const stored = readJSON(STORE_DAILY, null);
-      let body;
-      if (stored && stored.day === platform.todayUTC() && stored.sessionId) {
-        body = await platform.api(`sessions/${stored.sessionId}`);
-        const away = Math.max(0, (body.state.tick || 0) - (stored.tick || 0));
-        if (away > 0) toast(`While you were away: ${away} table event${away === 1 ? '' : 's'} played out.`);
-      } else {
-        body = await platform.api('sessions', {
-          method: 'POST',
-          body: JSON.stringify({ cfg: defToConfig(def) }),
-        });
-      }
-      const s = new Session(def, { transport: 'hosted', sessionId: body.sessionId, humanSeats: [0] });
-      s.state = body.state;
-      s.log = body.log || [];
-      if (s.state.winner >= 0) s.finished = true;
-      writeJSON(STORE_DAILY, { sessionId: body.sessionId, day: platform.todayUTC(), tick: s.state.tick });
-      launchSession(s, 'hosted');
-      return;
-    } catch (err) {
-      toast(`Hosted table unavailable (${err.message}) — playing locally.`);
-    }
-  }
-  startGame(def, { humanSeats: [0] });
+function startDaily() {
+  startGame(Content.dailyForDate(platform.todayUTC()), { humanSeats: [0] });
 }
 
 // --- game launch ----------------------------------------------------------------------
@@ -2693,7 +2595,6 @@ function launchSession(s, how) {
     const name = s.def.kind === 'learn' ? s.def.name : s.def.name;
     announce(`${name}. ${s.isHumanTurn() ? 'Your turn — roll the dice.' : 'Rival begins.'}`);
   }
-  if (how === 'hosted') toast('Hosted table: the server is authoritative.');
 }
 
 // --- results ----------------------------------------------------------------------
@@ -2780,7 +2681,6 @@ function showResults() {
 
 function showSettings(returnTo = 'title') {
   appPhase = 'settings';
-  const b = settings.bindings;
   setScreen(`
     <h1>Settings</h1>
     <section class="bb-section bb-form">
@@ -2806,7 +2706,7 @@ function showSettings(returnTo = 'title') {
       <div class="bb-field"><label for="s-ta">Timing assistance in timed challenges</label>
         <select id="s-ta">${[1, 1.5, 2].map((m) => `<option value="${m}" ${settings.timingAssist === m ? 'selected' : ''}>${m}×</option>`).join('')}</select></div>
       <h3>Keyboard bindings</h3>
-      <p>Roll <span class="bb-kbd">${esc(b.roll)}</span> · Undo <span class="bb-kbd">${esc(b.undo)}</span> · Hint <span class="bb-kbd">${esc(b.hint)}</span> · Pause <span class="bb-kbd">Esc</span> · Camera reset <span class="bb-kbd">${esc(b.cameraReset)}</span> · Navigate <span class="bb-kbd">←</span><span class="bb-kbd">→</span> · Confirm <span class="bb-kbd">Enter</span></p>
+      <p>Roll <span class="bb-kbd">${esc(keyLabel('roll'))}</span> · Undo <span class="bb-kbd">${esc(keyLabel('undo'))}</span> · Hint <span class="bb-kbd">${esc(keyLabel('hint'))}</span> · Pause <span class="bb-kbd">${esc(keyLabel('pause'))}</span> · Camera reset <span class="bb-kbd">${esc(keyLabel('cameraReset'))}</span> · Navigate <span class="bb-kbd">${esc(keyLabel('prev'))}</span><span class="bb-kbd">${esc(keyLabel('next'))}</span> · Confirm <span class="bb-kbd">Enter</span></p>
       <h3>Profile</h3>
       <div class="bb-field"><label for="s-name">Display name (guest — local only)</label>
         <input type="text" id="s-name" maxlength="24" value="${esc(settings.profile.name)}" /></div>
@@ -2846,7 +2746,6 @@ function showSettings(returnTo = 'title') {
     progress = structuredClone(DEFAULT_PROGRESS);
     saveProgress();
     storage.removeItem(STORE_SNAPSHOT);
-    storage.removeItem(STORE_DAILY);
     toast('Progress reset.');
   });
   $('#s-back').addEventListener('click', () => {
@@ -3011,10 +2910,6 @@ function wireStaticControls() {
   $('#bb-btn-resume').addEventListener('click', togglePause);
   $('#bb-btn-restart').addEventListener('click', () => {
     if (!session) return;
-    if (session.transport === 'hosted') {
-      toast('Hosted tables cannot be restarted — the server owns this game.');
-      return;
-    }
     $('#bb-pause-overlay').hidden = true;
     session.pause();
     session.clearPersisted();
