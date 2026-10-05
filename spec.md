@@ -147,6 +147,7 @@ Layouts (`css/main.css`):
 - **Tablet 768–1023 px:** rails narrow to 12.5 rem.
 - **Portrait mobile ≤767 px:** rails hidden; objective wraps to a full-width line; dice shrink to 30 px; the tray spans the width with 30%-wide buttons; tutorial card sits above the tray.
 - **Landscape mobile (height ≤500 px):** only the right rail (11 rem) remains; the tray docks to its left.
+- **Large screens (above 1600×1000):** `ui-scale.js` sets `--ui-scale` (1 up to a 1600×1000 viewport, then the smaller of width/1600 and height/1000, capped at 2.5) and the whole `#bb-ui` layer — HUD, rails, tray, tutorial card, dialogs, toasts and screens — is CSS-`zoom`ed by it (vw/vh lengths inside are divided by it); the full-window canvas is not zoomed, and the board camera re-fits to the safe rectangle left by the larger chrome.
 - Safe areas: every fixed element offsets by `env(safe-area-inset-*)`; the viewport meta uses `viewport-fit=cover`.
 - Must never be cut off: turn indicator, dice tray, Roll/Pass buttons, cube Accept/Decline, tutorial text, results `Menu`/`Retry`. Screens scroll vertically; the key-art and result illustrations shrink on short viewports.
 
