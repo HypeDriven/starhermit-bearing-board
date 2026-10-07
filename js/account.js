@@ -48,6 +48,22 @@ export function createAccount(SH) {
       return Object.keys(patch).length ? SH.patchSettings(patch) : null;
     },
 
+    /**
+     * Post a finished game to the leaderboards (score-script.js).
+     * → { posted, rank } — rank on the high-score board, or null.
+     */
+    async submitScore(points) {
+      if (!this.signedIn) return { posted: false, rank: null };
+      let keys;
+      try { keys = await SH.submitScores({ 'high-score': points }); } catch { return { posted: false, rank: null }; }
+      if (!keys || keys.indexOf('high-score') < 0) return { posted: false, rank: null };
+      try {
+        const r = await SH.leaderboard('high-score', { pageSize: 100 });
+        const me = (r.items || []).find((i) => i.userId === SH.userId);
+        return { posted: true, rank: me ? me.rank : null };
+      } catch { return { posted: true, rank: null }; }
+    },
+
     reset() { cloudReady = false; pushed = null; },
   };
 }

@@ -29,8 +29,9 @@ File map (everything that ships or is run):
 | `js/gfx.js` | Pure graphics quality model: presets, categories, GPU detection, `resolve`, `presetTier`, `choosePreset`, `describe` |
 | `js/gfx-strings.js` | Graphics-section strings in the nine supported locales, `pickLocale` |
 | `js/post.js` | Loaded on demand: EffectComposer chain (GTAO, bloom, grade + vignette, SMAA/FXAA) and the PMREM room environment |
-| `server.js` | Static host plus same-origin `/api/v1` (time, authoritative sessions, replay) running the same `rules.js` |
-| `starhermit.txt` | Platform manifest: `name`, `launch=index.html`, `owner`, `server=server.js`, `version`, `contentVersion`, `cover` |
+| `score-script.js` | StarHermit platform script (`server=`): range-checks a finished game's match points and posts them to the `high-score` leaderboard (canonical copy in the games repo's `tools/score-script.js`) |
+| `server.js` | Local dev server: static host plus same-origin `/api/v1` (time, authoritative sessions, replay) running the same `rules.js` |
+| `starhermit.txt` | Platform manifest: `name`, `launch=index.html`, `owner`, `server=score-script.js`, `version`, `contentVersion`, `cover` |
 | `assets/` | `key-art.webp` (title), `results-victory.webp`, `results-road.webp` |
 | `sfx/` | 21 Opus clips, `manifest.txt` (canonical), `manifest.json` (generator input), `manifest.md` (generator output) |
 | `coverart.png`, `icon.png`, `favicon.svg` | Store cover (1200x675) and icons |
@@ -225,8 +226,8 @@ Shipped language: English (`<html lang="en">`), except the Graphics settings sec
 ## 12. StarHermit integration
 
 Conventions from https://wiki.starhermit.com/ used today:
-- **Manifest:** `starhermit.txt` with `name=Bearing Board`, `launch=index.html`, `owner=<uuid>`, `server=server.js`, `version=1.0.0`, `contentVersion=1`, `cover=coverart.png`.
-- **Server script:** `server.js` serves the distribution and a same-origin `/api/v1` implemented with the shared `rules.js`: `GET time` (the only route the client calls, and only when signed in: round-trip-adjusted offset in `platform.init`, used for the daily's UTC day and countdown), and — exercised only by the server tests, not called by the client — `POST sessions` (validated config → authoritative table), `GET sessions/:id` (reconnect snapshot; the client shows "While you were away: N table events"), `POST sessions/:id/commands` (seat 0 only, short unique `id`, type whitelist, 8 KB body cap, 60 requests / 10 s per address, duplicate ids answered idempotently, AI seats played out server-side), `GET sessions/:id/replay` (envelope with hashes). Sessions are in-memory, capped at 500 by last touch.
+- **Manifest:** `starhermit.txt` with `name=Bearing Board`, `launch=index.html`, `owner=<uuid>`, `server=score-script.js`, `version=1.0.0`, `contentVersion=1`, `cover=coverart.png`.
+- **Server script:** `score-script.js` is the platform script (leaderboard posting, below). `server.js` (local dev server) serves the distribution and a same-origin `/api/v1` implemented with the shared `rules.js`: `GET time` (the only route the client calls, and only when signed in: round-trip-adjusted offset in `platform.init`, used for the daily's UTC day and countdown), and — exercised only by the server tests, not called by the client — `POST sessions` (validated config → authoritative table), `GET sessions/:id` (reconnect snapshot; the client shows "While you were away: N table events"), `POST sessions/:id/commands` (seat 0 only, short unique `id`, type whitelist, 8 KB body cap, 60 requests / 10 s per address, duplicate ids answered idempotently, AI seats played out server-side), `GET sessions/:id/replay` (envelope with hashes). Sessions are in-memory, capped at 500 by last touch.
 - **SDK:** `starhermit-sdk.js` (verbatim copy of the canonical client) loads as a classic script before `js/main.js`, which calls `StarHermit.init()` first thing; `js/account.js` (`createAccount`) wraps the account calls and `platform` in `js/main.js` wires them to the UI. Without a token no StarHermit request is made.
 - **Launch token and renewal:** the SDK reads `#game_token=<jwt>[&session_id=]` or a sign-in return `#access_token=…`, strips it, takes the slug from `game_scope` (never hard-coded) and renews via `POST /api/v1/games/{slug}/launch-token`. The token also rides as `Authorization: Bearer` on `GET api/v1/time`. If renewal is refused the player sees "Signed out of StarHermit — progress stays on this device." and keeps playing locally. No tokens are persisted.
 - **Sign-in:** on `*.starhermit.com` without a token the title menu shows **Sign in with StarHermit** (`StarHermit.signIn()`); hidden when signed in and locally.
@@ -235,9 +236,10 @@ Conventions from https://wiki.starhermit.com/ used today:
 - **Settings KV:** every `saveSettings` sends the changed keys (audio, volumes, graphics, theme, reduced motion, contrast, text size, handedness, haptics, tap-to-select, timing assistance, guest name) with `PATCH /api/v1/games/{slug}/settings`; on start the platform's values override local ones.
 - **Invite:** when signed in the title menu shows **Invite a friend**, which copies `StarHermit.inviteLink()` and confirms with a toast (the link is shown when the clipboard is blocked).
 - **Controls:** `starhermit.txt` declares `control.roll`, `undo`, `hint`, `pause`, `cameraReset`, `prev`, `next`; keydown routes by `event.code` through `StarHermit.loadBindings` (defaults standalone), and Settings → Keyboard bindings lists the effective keys.
-- **Strings:** sign-in, invite, toast and sign-out texts exist in all nine locales (`ACCOUNT_STRINGS` in `js/gfx-strings.js`).
+- **Leaderboard:** when signed in, every finished solo game except lessons posts seat 0's match points (0 for a loss) through `StarHermit.submitScores` (a practice session whose `score-script.js` posts it to the `high-score` board "Match points", integer, higher is better, 0–192), once per game, and the results screen shows "Leaderboard rank: #N" (or posted / not posted). Hot-seat games with more than one human and standalone play post nothing.
+- **Strings:** sign-in, invite, toast, sign-out and leaderboard texts exist in all nine locales (`ACCOUNT_STRINGS` in `js/gfx-strings.js`).
 - On the platform the game's own session routes only exist if the declared backend runs in front of them; otherwise the daily start falls back to a local table with a toast, with no console errors.
-- **Not used:** StarHermit achievements and leaderboards (`server.js` is an HTTP host, not a platform script reporting `scores`/`achievements`; unlocks stay local), platform sessions/matchmaking/invites/chat/replays, the `server.js` session routes, avatars (no player chip), presence, voice, WebSocket events. The daily's `ranked: true` flag is informational; no score is submitted anywhere.
+- **Not used:** StarHermit achievements (unlocks stay local), platform sessions/matchmaking/invites/chat/replays, the `server.js` session routes, avatars (no player chip), presence, voice, WebSocket events. The daily's `ranked: true` flag is informational; the daily posts to the same `high-score` board as any other solo game.
 
 ## 13. Technical architecture
 
@@ -300,7 +302,7 @@ QA bar (checkable):
 ## Design intent not yet implemented
 
 - Localization of the remaining UI and content into en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT with a string table and language selection from the platform profile/browser.
-- Presence, activity start/end, leaderboard submission for the daily, and platform-side achievement unlocks.
+- Presence, activity start/end, a separate daily leaderboard, and platform-side achievement unlocks.
 - A concede control in the pause dialog.
 - Refusing `tests/`, `tools/` and dotfiles in `server.js`.
 - A rendered brass stakes cube on the board (currently a HUD badge).

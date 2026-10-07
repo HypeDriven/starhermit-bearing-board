@@ -2599,6 +2599,23 @@ function launchSession(s, how) {
 
 // --- results ----------------------------------------------------------------------
 
+// Signed-in solo games (not lessons) post seat 0's match points — 0 for a
+// loss — to the high-score board once, and the results line shows the rank.
+function postToLeaderboard(def, res) {
+  const line = $('#bb-results-lb');
+  if (!line || !account.signedIn || def.kind === 'learn' || session.humanSeats.size !== 1) return;
+  line.hidden = false;
+  if (session.lbLine) { line.textContent = session.lbLine; return; }
+  line.textContent = ACCOUNT.lbPosting;
+  const s = session;
+  if (!s.lbPost) s.lbPost = account.submitScore(res.winner === 0 ? res.points : 0);
+  s.lbPost.then((r) => {
+    s.lbLine = !r.posted ? ACCOUNT.lbNotPosted : r.rank ? ACCOUNT.lbRank.replace('{rank}', r.rank) : ACCOUNT.lbPosted;
+    const el = $('#bb-results-lb');
+    if (el && session === s) el.textContent = s.lbLine;
+  });
+}
+
 function showResults() {
   if (!session?.result) return;
   appPhase = 'results';
@@ -2644,6 +2661,7 @@ function showResults() {
       <p class="bb-tagline">Seed ${state.cfg.seed} · rules v${Rules.RULES_VERSION} · content v${Content.CONTENT_VERSION}</p>
       <button class="bb-btn" id="r-replay">Copy replay envelope</button>
     </section>
+    <p class="bb-center bb-tagline" id="bb-results-lb" hidden></p>
     <div class="bb-row" style="justify-content:center">
       <button class="bb-btn" id="r-menu">Menu</button>
       <button class="bb-btn" id="r-retry">Retry</button>
@@ -2652,6 +2670,7 @@ function showResults() {
   `);
 
   $('#r-menu').addEventListener('click', () => { Audio.stopMusic(); showTitle(); });
+  postToLeaderboard(def, res);
   $('#r-retry').addEventListener('click', () => {
     funnel.track('retry', def.kind);
     const fresh = def.kind === 'practice'
