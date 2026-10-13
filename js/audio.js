@@ -27,7 +27,7 @@ function ensureCtx() {
       const g = ctx.createGain();
       g.gain.value = enabled ? volumes[name] : 0;
       g.connect(ctx.destination);
-      buses[name] = g;
+      buses[name] = (globalThis.GameOptions ? globalThis.GameOptions.tagBus(g, name) : g);
     }
   } catch (_) { ctx = null; }
 }
@@ -67,7 +67,7 @@ export function setBackgrounded(hidden) {
 function blip(bus, freq, dur, gain, type = 'triangle', when = 0, glide = 0) {
   if (!ctx || !buses || gain <= 0) return;
   const t = ctx.currentTime + when;
-  const o = ctx.createOscillator();
+  const o = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), bus) : ctx.createOscillator());
   const g = ctx.createGain();
   o.type = type;
   o.frequency.setValueAtTime(freq, t);
@@ -87,7 +87,7 @@ function noise(bus, dur, gain, freq = 1200, q = 0.8, when = 0) {
   const data = buf.getChannelData(0);
   const rng = createRng(hashSeed(`noise:${musicSeed}:${len}:${freq}`));
   for (let i = 0; i < len; i++) data[i] = (rng.next() * 2 - 1) * (1 - i / len);
-  const src = ctx.createBufferSource();
+  const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createBufferSource(), bus) : ctx.createBufferSource());
   src.buffer = buf;
   const f = ctx.createBiquadFilter();
   f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = q;
@@ -114,7 +114,7 @@ export function startAmbience(themeKey = 'caravan') {
     last = last * 0.98 + (rng.next() * 2 - 1) * 0.02; // brown-ish drift
     data[i] = last * 6;
   }
-  const src = ctx.createBufferSource();
+  const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createBufferSource(), null) : ctx.createBufferSource());
   src.buffer = buf; src.loop = true;
   const f = ctx.createBiquadFilter();
   f.type = 'lowpass'; f.frequency.value = 420;
@@ -218,7 +218,7 @@ function loadSample(base) {
 function playSample(base) {
   const buf = sampleCache.get(base);
   if (!buf) { loadSample(base); return false; }
-  const src = ctx.createBufferSource();
+  const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createBufferSource(), null) : ctx.createBufferSource());
   src.buffer = buf;
   src.connect(buses.effects);
   src.start();

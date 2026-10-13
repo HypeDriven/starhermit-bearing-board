@@ -1807,8 +1807,8 @@ function createRenderer(canvas) {
     const w = canvas.clientWidth || innerWidth, h = canvas.clientHeight || innerHeight;
     const key = postKeyFor(w, h);
     if (key !== postKey) { postKey = key; rebuildPost(w, h); }
-    if (composer) composer.render(dt);
-    else renderer.render(scene, camera);
+    if (composer) (globalThis.GameOptions ? globalThis.GameOptions.draw(composer.renderer, () => composer.render(dt)) : composer.render(dt));
+    else (globalThis.GameOptions ? globalThis.GameOptions.draw(renderer, () => renderer.render(scene, camera)) : renderer.render(scene, camera));
   }
 
   function startLoop() {
