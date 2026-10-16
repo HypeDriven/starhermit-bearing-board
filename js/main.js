@@ -15,8 +15,10 @@ import * as Content from './content.js';
 import * as AI from './ai.js';
 import * as Audio from './audio.js';
 import * as Gfx from './gfx.js';
-import { gfxStrings, pickLocale, accountStrings } from './gfx-strings.js';
+import { gfxStrings, accountStrings } from './gfx-strings.js';
 import { createAccount } from './account.js';
+import { t, getLang, onLanguage, applyDom } from './i18n.js';
+import { DEFAULT_PROGRESS, mergeProgress } from './progress.js';
 
 // StarHermit SDK (starhermit-sdk.js, classic script loaded first): read the
 // launch fragment before anything else looks at the URL.
@@ -122,7 +124,7 @@ function actionForCode(code) {
   return null;
 }
 function keyLabel(action) {
-  const names = { Escape: 'Esc', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Space: 'Space' };
+  const names = { Escape: 'Esc', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Space: t('key.Space') };
   return (keyBindings[action] || []).map((c) => names[c] || c.replace(/^Key/, '').replace(/^Digit/, '')).join('/');
 }
 
@@ -150,15 +152,6 @@ function isMobileDevice() {
 // Progress: versioned, checksummed document. Never holds credentials.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_PROGRESS = {
-  version: 1,
-  journey: {},          // defId -> {stars, bestTurns, goalsMet}
-  lessons: {},          // defId -> {done}
-  challenges: {},       // defId -> {done, best}
-  daily: { days: [], lastDay: null },
-  achievements: {},     // key -> {at}
-  stats: { games: 0, wins: 0, hits: 0, sweeps: 0 },
-};
 
 function loadProgress() {
   const doc = readJSON(STORE_PROGRESS, null);
@@ -180,8 +173,8 @@ function unlockAchievement(key) {
   progress.achievements[key] = { at: new Date().toISOString() };
   saveProgress();
   Audio.playEvent('unlock');
-  toast(`Achievement unlocked — ${def.label}`);
-  announce(`Achievement unlocked: ${def.label}. ${def.desc}`, true);
+  toast(t('ach.toast', { name: achLabel(def) }));
+  announce(t('ach.announce', { name: achLabel(def), desc: achDesc(def) }), true);
   return def;
 }
 
@@ -191,9 +184,49 @@ function journeyStars() {
 
 function masteryTitle() {
   const stars = journeyStars();
-  let title = Content.MASTERY_TIERS[0].title;
-  for (const tier of Content.MASTERY_TIERS) if (stars >= tier.stars) title = tier.title;
+  let title = t('tier.0', null, Content.MASTERY_TIERS[0].title);
+  Content.MASTERY_TIERS.forEach((tier, i) => { if (stars >= tier.stars) title = t(`tier.${i}`, null, tier.title); });
   return { stars, title };
+}
+
+// ---------------------------------------------------------------------------
+// Localized content names (content.js keeps English data; js/i18n.js has the
+// translations keyed by id).
+// ---------------------------------------------------------------------------
+
+function achLabel(def) { return t(`ach.${def.key}`, null, def.label); }
+function achDesc(def) { return t(`ach.${def.key}.d`, null, def.desc); }
+function aiLabel(key) { return t(`ai.${key}`, null, key); }
+function aiWord(key) { return t(`ai.${key}.w`, null, key); }
+function rulesetLabel(key) { return t(`rs.${key}`, null, Rules.RULESETS[key]?.label || key); }
+function themeLabel(th) { return t(`theme.${th.key}`, null, th.label); }
+function defName(def) {
+  if (!def) return '';
+  if (def.kind === 'journey') return t(`j.${def.id}`, null, def.name);
+  if (def.kind === 'learn') return t(`l.${def.id}`, null, def.name);
+  if (def.kind === 'challenge') return t(`c.${def.id}`, null, def.name);
+  if (def.kind === 'daily') return t('daily.name', { date: String(def.id).replace(/^daily-/, '') }, def.name);
+  if (def.kind === 'practice') {
+    const d = def.ai?.difficulty || 'steady';
+    return t('prac.name', { ruleset: rulesetLabel(def.ruleset), difficulty: aiLabel(d), dw: aiWord(d) }, def.name);
+  }
+  return def.name;
+}
+function defBlurb(def) {
+  if (!def) return '';
+  if (def.kind === 'journey') return t(`jb.${def.id}`, null, def.blurb);
+  if (def.kind === 'learn') return t(`lb.${def.id}`, null, def.blurb);
+  if (def.kind === 'challenge') return t(`cb.${def.id}`, null, def.blurb);
+  if (def.kind === 'practice') return t('prac.blurb', null, def.blurb);
+  if (def.kind === 'daily') {
+    const d = aiWord(def.ai?.difficulty || 'steady');
+    return def.ruleset === 'circuit' ? t('daily.circuit', { n: def.players, d }, def.blurb) : t('daily.duel', { d }, def.blurb);
+  }
+  return def.blurb || '';
+}
+function profileName() {
+  const n = settings.profile.name;
+  return !n || n === DEFAULT_SETTINGS.profile.name ? t('profile.default') : n;
 }
 
 // ---------------------------------------------------------------------------
@@ -261,7 +294,8 @@ function fmtClock(ms) {
 // Standalone uses the local clock and makes no own-server request.
 // ---------------------------------------------------------------------------
 
-const ACCOUNT = accountStrings(pickLocale(typeof navigator !== 'undefined' ? navigator.languages || [navigator.language] : []));
+// StarHermit account strings follow the game language (js/i18n.js).
+let ACCOUNT = accountStrings(getLang());
 
 const platform = {
   timeOffsetMs: 0,
@@ -308,6 +342,14 @@ const platform = {
     if (changed) { writeJSON(STORE_SETTINGS, settings); applySettings(); }
     account.mirrorSettings(settings); // seed keys the platform does not have yet
     keyBindings = r.bindings;
+    // Another device saved first: merge both progress documents and save the merge.
+    account.onSaveConflict((doc) => {
+      const remoteData = doc && doc.data && doc.check === checksum(doc.data) ? doc.data : null;
+      progress = mergeProgress(remoteData, progress);
+      writeJSON(STORE_PROGRESS, { data: progress, check: checksum(progress) });
+      this.saveCloud();
+      if (appPhase === 'title') showTitle();
+    });
     window.addEventListener('pagehide', () => account.flush());
     document.addEventListener('visibilitychange', () => { if (document.hidden) account.flush(); });
   },
@@ -480,9 +522,10 @@ class Session {
     const r = Rules.applyCommand(this.state, cmd);
     if (!r.ok) {
       const reason = r.events[0]?.reason || 'illegal action';
+      const why = t(`rule.${reason}`, null, reason);
       Audio.playEvent('invalid');
-      toast(`Not allowed: ${reason}`);
-      announce(`Invalid action: ${reason}`, true);
+      toast(t('invalid.toast', { reason: why }));
+      announce(t('invalid.announce', { reason: why }), true);
       this.state = r.state; // invalid-action stats are authoritative
       return { ok: false, reason };
     }
@@ -611,7 +654,7 @@ class Session {
   hint() {
     if (!this.def.mechanics?.hint || !this.isHumanTurn()) return null;
     const h = AI.suggestHint(this.state, this.state.active);
-    if (h) { toast(h.text); announce(`Hint: ${h.text}`); }
+    if (h) { const text = hintText(h); toast(text); announce(t('hint.announce', { text })); }
     return h;
   }
 
@@ -623,6 +666,18 @@ class Session {
     this.clearPersisted();
     this.newAchievements = applyOutcome(this, result) || [];
   }
+}
+
+// Hint text from AI.suggestHint's structured result, in the game language.
+function hintText(h) {
+  if (h.kind === 'roll') return t('hint.roll');
+  if (h.kind === 'pass') return t('hint.pass');
+  const m = h.move;
+  if (!m) return h.text;
+  const from = m.from === 'rail' ? t('place.rail') : t('place.point', { n: m.from + 1 });
+  const to = m.to === 'off' ? t('place.off') : t('place.point', { n: m.to + 1 });
+  const why = m.hit ? t('hint.hit') : m.to === 'off' ? t('hint.off') : '';
+  return `${t('hint.move', { from, to, die: m.die })} ${why}`.trim();
 }
 
 function defToConfig(def) {
@@ -652,13 +707,14 @@ function evaluateGoals(def, state, thinkingMs) {
   const hitsAgainst = state.stats.hits.reduce((a, h, p) => (p === me ? a : a + h), 0);
   const timeLimit = goals.maxTimeSec ? goals.maxTimeSec * settings.timingAssist : null;
   const items = [];
-  const add = (key, label, met) => items.push({ key, label, met: !!met });
-  if (goals.win !== false) add('win', won ? 'You won the table' : 'Win the table', won);
-  if (goals.maxTurns) add('maxTurns', `Finish within ${goals.maxTurns} turns (${state.turnNum})`, state.turnNum <= goals.maxTurns);
-  if (goals.minHits) add('minHits', `Strike at least ${goals.minHits} markers (${state.stats.hits[me]})`, state.stats.hits[me] >= goals.minHits);
-  if (goals.minPoints) add('minPoints', `Win at stakes of ${goals.minPoints}+ (${res.points})`, won && res.points >= goals.minPoints);
-  if (goals.maxHitsAgainst != null) add('maxHitsAgainst', `Be struck at most ${goals.maxHitsAgainst} times (${hitsAgainst})`, hitsAgainst <= goals.maxHitsAgainst);
-  if (timeLimit) add('maxTimeSec', `Think for under ${Math.round(timeLimit / 60)} min (${fmtClock(thinkingMs)})`, thinkingMs <= timeLimit * 1000);
+  // Labels are rendered from key + values so the results screen follows the language.
+  const add = (key, vars, met) => items.push({ key, vars, met: !!met });
+  if (goals.win !== false) add(won ? 'won' : 'win', {}, won);
+  if (goals.maxTurns) add('maxTurns', { n: goals.maxTurns, cur: state.turnNum }, state.turnNum <= goals.maxTurns);
+  if (goals.minHits) add('minHits', { n: goals.minHits, cur: state.stats.hits[me] }, state.stats.hits[me] >= goals.minHits);
+  if (goals.minPoints) add('minPoints', { n: goals.minPoints, cur: res.points }, won && res.points >= goals.minPoints);
+  if (goals.maxHitsAgainst != null) add('maxHitsAgainst', { n: goals.maxHitsAgainst, cur: hitsAgainst }, hitsAgainst <= goals.maxHitsAgainst);
+  if (timeLimit) add('maxTimeSec', { n: Math.round(timeLimit / 60), cur: fmtClock(thinkingMs) }, thinkingMs <= timeLimit * 1000);
   const complete = items.length > 0 && items[0].met;
   const allMet = items.every((i) => i.met);
   return { items, won, complete, allMet };
@@ -955,7 +1011,7 @@ function createRenderer(canvas) {
     canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
       contextLost = true;
-      announce('Graphics context lost — rebuilding the board.', true);
+      announce(t('gl.lost'), true);
     });
     canvas.addEventListener('webglcontextrestored', () => {
       contextLost = false;
@@ -1854,11 +1910,11 @@ let appPhase = 'title'; // boot → title → mode-select → active → results
 let selection = null;   // {origin: {kind:'point'|'rail', point?}, moves: []}
 let dragState = null;
 
-const PLAYER_NAMES = ['You', 'Rival 1', 'Rival 2', 'Rival 3'];
-
 function seatName(seat) {
-  if (session?.humanSeats.has(seat) && seat !== 0) return `Traveler ${seat + 1}`;
-  return PLAYER_NAMES[seat] || `Seat ${seat + 1}`;
+  if (session?.humanSeats.has(seat) && seat !== 0) return t('seat.traveler', { n: seat + 1 });
+  if (seat === 0) return t('seat.you');
+  if (seat >= 1 && seat <= 3) return t('seat.rival', { n: seat });
+  return t('seat.seat', { n: seat + 1 });
 }
 
 function seatColor(seat) {
@@ -1916,19 +1972,19 @@ function announceEvents(events) {
   for (const ev of events) {
     const who = ev.player != null ? seatName(ev.player) : '';
     switch (ev.type) {
-      case 'roll': announce(`${who} rolled ${ev.dice[0]} and ${ev.dice[1]}${ev.dice[0] === ev.dice[1] ? ' — doubles, four moves' : ''}.`); break;
+      case 'roll': announce(t(ev.dice[0] === ev.dice[1] ? 'ev.rollDoubles' : 'ev.roll', { who, a: ev.dice[0], b: ev.dice[1] })); break;
       case 'move':
-        if (ev.to === 'off') announce(`${who} bore a marker off from point ${ev.from + 1}.`);
-        else if (ev.hit) announce(`${who} hit on point ${ev.to + 1}.`, true);
+        if (ev.to === 'off') announce(t('ev.bearOff', { who, n: ev.from + 1 }));
+        else if (ev.hit) announce(t('ev.hit', { who, n: ev.to + 1 }), true);
         break;
-      case 'noMoves': announce(`${who} has no legal move.`, true); break;
-      case 'pass': announce(`${who} passes.`); break;
-      case 'double': announce(`${who} offers stakes of ${ev.value}.`, true); break;
-      case 'accept': announce(`${who} accepts. Stakes are now ${ev.value}.`); break;
-      case 'decline': announce(`${who} declines the stakes.`); break;
-      case 'concede': announce(`${who} concedes.`); break;
+      case 'noMoves': announce(t('ev.noMoves', { who }), true); break;
+      case 'pass': announce(t('ev.pass', { who })); break;
+      case 'double': announce(t('ev.double', { who, n: ev.value }), true); break;
+      case 'accept': announce(t('ev.accept', { who, n: ev.value })); break;
+      case 'decline': announce(t('ev.decline', { who })); break;
+      case 'concede': announce(t('ev.concede', { who })); break;
       case 'turn': break; // covered by roll announcements
-      case 'gameOver': announce(`Game over. ${seatName(ev.result.winner)} wins ${ev.result.points} match point${ev.result.points === 1 ? '' : 's'}.`, true); break;
+      case 'gameOver': announce(t(ev.result.points === 1 ? 'ev.gameOver1' : 'ev.gameOverN', { who: seatName(ev.result.winner), n: ev.result.points }), true); break;
     }
   }
 }
@@ -1942,19 +1998,19 @@ function updateHUD() {
 
   // Objective line
   const goalBits = [];
-  if (def.goals?.maxTurns) goalBits.push(`within ${def.goals.maxTurns} turns (turn ${st.turnNum})`);
-  if (def.goals?.minHits) goalBits.push(`${def.goals.minHits}+ strikes`);
-  if (def.goals?.maxTimeSec) goalBits.push(`thinking ${fmtClock(session.thinkingMs)} / ${Math.round(def.goals.maxTimeSec * settings.timingAssist / 60)} min`);
-  if (def.options?.moveLimit) goalBits.push(`move limit ${def.options.moveLimit}`);
-  $('#bb-objective').textContent = `${def.name} — bear all your markers off first${goalBits.length ? ' · ' + goalBits.join(' · ') : ''}`;
+  if (def.goals?.maxTurns) goalBits.push(t('hud.goalTurns', { n: def.goals.maxTurns, cur: st.turnNum }));
+  if (def.goals?.minHits) goalBits.push(t('hud.goalHits', { n: def.goals.minHits }));
+  if (def.goals?.maxTimeSec) goalBits.push(t('hud.goalTime', { t: fmtClock(session.thinkingMs), n: Math.round(def.goals.maxTimeSec * settings.timingAssist / 60) }));
+  if (def.options?.moveLimit) goalBits.push(t('hud.moveLimit', { n: def.options.moveLimit }));
+  $('#bb-objective').textContent = t('hud.objective', { name: defName(def) }) + (goalBits.length ? ' · ' + goalBits.join(' · ') : '');
 
   // Turn indicator
   const who = st.phase === 'cube'
-    ? `${seatName((st.cube.pending.by + 1) % st.cfg.players)} answers the stakes`
+    ? t('turn.answers', { who: seatName((st.cube.pending.by + 1) % st.cfg.players) })
     : st.phase === 'roll'
-      ? `${seatName(st.active)} to roll`
-      : `${seatName(st.active)} to move`;
-  $('#bb-turn-indicator').textContent = session.over ? 'Game over' : who;
+      ? t('turn.roll', { who: seatName(st.active) })
+      : t('turn.move', { who: seatName(st.active) });
+  $('#bb-turn-indicator').textContent = session.over ? t('turn.over') : who;
 
   // Dice tray
   const tray = $('#bb-dice-tray');
@@ -1972,12 +2028,12 @@ function updateHUD() {
       const isUsed = at < 0;
       if (!isUsed) remaining.splice(at, 1);
       el.textContent = d;
-      el.setAttribute('aria-label', `Die ${d}${isUsed ? ' (used)' : ''}`);
+      el.setAttribute('aria-label', t(isUsed ? 'die.used' : 'die.aria', { n: d }));
       if (isUsed) el.classList.add('bb-used');
       tray.appendChild(el);
     }
   } else {
-    tray.innerHTML = '<span class="bb-tile-sub">No dice yet</span>';
+    tray.innerHTML = `<span class="bb-tile-sub">${esc(t('dice.none'))}</span>`;
   }
 
   // Players
@@ -1988,22 +2044,22 @@ function updateHUD() {
     row.className = 'bb-player-row' + (p === st.active && !session.over ? ' bb-active' : '');
     const pips = Rules.pipCount(st, p);
     row.innerHTML = `<span class="bb-swatch" style="background:${seatColor(p)}"></span>
-      <span>${esc(seatName(p))}${st.alive[p] ? '' : ' (out)'}</span>
-      <span class="bb-pip" style="margin-left:auto">${st.off[p]} off · ${st.rail[p]} rail · ${pips} pips</span>`;
+      <span>${esc(seatName(p))}${st.alive[p] ? '' : esc(t('player.out'))}</span>
+      <span class="bb-pip" style="margin-left:auto">${esc(t('player.stats', { off: st.off[p], rail: st.rail[p], pips }))}</span>`;
     playersEl.appendChild(row);
   }
 
   // Objective rail
-  $('#bb-rail-objective').innerHTML = `<p>${esc(def.blurb || def.name)}</p>
-    <p><span class="bb-badge">${esc(Rules.RULESETS[st.cfg.ruleset].label)}</span>
-    <span class="bb-badge">${st.cfg.players} seats</span>
-    ${def.ranked ? '<span class="bb-badge bb-on">ranked</span>' : '<span class="bb-badge">unranked</span>'}
-    ${def.options?.cube ? `<span class="bb-badge">stakes ×${st.cube.value}</span>` : ''}</p>`;
+  $('#bb-rail-objective').innerHTML = `<p>${esc(defBlurb(def) || defName(def))}</p>
+    <p><span class="bb-badge">${esc(rulesetLabel(st.cfg.ruleset))}</span>
+    <span class="bb-badge">${esc(t('badge.seats', { n: st.cfg.players }))}</span>
+    ${def.ranked ? `<span class="bb-badge bb-on">${esc(t('badge.ranked'))}</span>` : `<span class="bb-badge">${esc(t('badge.unranked'))}</span>`}
+    ${def.options?.cube ? `<span class="bb-badge">${esc(t('badge.stakes', { n: st.cube.value }))}</span>` : ''}</p>`;
   $('#bb-rail-progress').innerHTML =
-    `<p class="bb-pip">Turn ${st.turnNum} · strikes ${st.stats.hits[0]} · borne off ${st.off[0]}/${Rules.RULESETS[st.cfg.ruleset].markers}</p>`;
+    `<p class="bb-pip">${esc(t('progress.line', { turn: st.turnNum, hits: st.stats.hits[0], off: st.off[0], total: Rules.RULESETS[st.cfg.ruleset].markers }))}</p>`;
   $('#bb-rail-status').innerHTML =
-    `<p>Local table.</p>
-     <p class="bb-pip">Seed ${st.cfg.seed} · v${Rules.RULES_VERSION}</p>`;
+    `<p>${esc(t('status.local'))}</p>
+     <p class="bb-pip">${esc(t('status.seed', { seed: st.cfg.seed, v: Rules.RULES_VERSION }))}</p>`;
 
   // Action buttons
   const acts = humanTurn ? Rules.legalActions(st) : [];
@@ -2013,7 +2069,6 @@ function updateHUD() {
   $('#bb-btn-pass').disabled = !can('pass');
   $('#bb-btn-undo').disabled = !session.canUndo();
   $('#bb-btn-hint').disabled = !(def.mechanics?.hint && humanTurn);
-  $('#bb-btn-roll').textContent = st.phase === 'roll' ? 'Roll' : 'Roll';
 }
 
 // --- cube overlay -----------------------------------------------------------
@@ -2022,9 +2077,7 @@ function updateCubeOverlay() {
   const st = session.state;
   const overlay = $('#bb-cube-overlay');
   if (st.phase === 'cube' && session.isHumanTurn() && !session.over) {
-    $('#bb-cube-text').textContent =
-      `${seatName(st.cube.pending.by)} offers to raise the stakes to ${st.cube.pending.value}. ` +
-      'Accept to play on at the higher stakes, or decline and concede the current stakes.';
+    $('#bb-cube-text').textContent = t('cube.text', { who: seatName(st.cube.pending.by), n: st.cube.pending.value });
     const wasHidden = overlay.hidden;
     overlay.hidden = false;
     // Only claim focus when the dialog opens, never on every state refresh.
@@ -2072,8 +2125,8 @@ function selectOrigin(from) {
   // Deduplicate target markers (same destination, different dice)
   const uniq = [...new Map(targets.map((t) => [`${t.to}`, t])).values()];
   rendererApi.setSelection(originPos, uniq, hits);
-  const targetNames = uniq.map((t) => (t.to === 'off' ? 'bear off' : `point ${t.to + 1}`)).join(', ');
-  announce(`Selected ${from === 'rail' ? 'your rail marker' : `point ${from + 1}`}. Targets: ${targetNames}.`);
+  const targetNames = uniq.map((tg) => (tg.to === 'off' ? t('sel.bearOff') : t('place.point', { n: tg.to + 1 }))).join(', ');
+  announce(t('sel.announce', { origin: from === 'rail' ? t('sel.rail') : t('place.point', { n: from + 1 }), targets: targetNames }));
 }
 
 function commitMove(to) {
@@ -2089,21 +2142,21 @@ function commitMove(to) {
 
 function explainInvalid(pickData) {
   const st = session.state;
-  let reason = 'Nothing to do there.';
-  if (st.phase === 'roll') reason = 'Roll the dice first.';
-  else if (!session.isHumanTurn()) reason = 'Wait for the rival.';
+  let reason = t('why.nothing');
+  if (st.phase === 'roll') reason = t('why.roll');
+  else if (!session.isHumanTurn()) reason = t('why.wait');
   else if (st.phase === 'move') {
     if (st.rail[st.active] > 0 && pickData?.kind === 'point') {
-      reason = 'Your rail marker must re-enter first.';
+      reason = t('why.rail');
     } else if (pickData?.kind === 'point') {
       const cell = st.points[pickData.point];
-      if (cell.owner !== st.active || cell.count === 0) reason = 'That point holds no marker of yours.';
-      else reason = 'None of the remaining dice can move that marker.';
-    } else if (pickData?.kind === 'off') reason = 'You can only bear off with a die that reaches the edge.';
+      if (cell.owner !== st.active || cell.count === 0) reason = t('why.noMarker');
+      else reason = t('why.noDie');
+    } else if (pickData?.kind === 'off') reason = t('why.off');
   }
   Audio.playEvent('invalid');
   toast(reason);
-  announce(`Cannot move: ${reason}`);
+  announce(t('why.announce', { reason }));
 }
 
 function handlePick(data) {
@@ -2195,7 +2248,7 @@ function initKeyboard() {
     if (act === 'roll' && !$('#bb-btn-roll').disabled) { e.preventDefault(); doCommand({ type: 'roll', player: session.state.active }); }
     else if (act === 'undo' && !$('#bb-btn-undo').disabled) { e.preventDefault(); undoMove(); }
     else if (act === 'hint' && !$('#bb-btn-hint').disabled) { e.preventDefault(); session.hint(); }
-    else if (act === 'cameraReset') { e.preventDefault(); rendererApi.resize(); announce('Camera reset.'); }
+    else if (act === 'cameraReset') { e.preventDefault(); rendererApi.resize(); announce(t('an.camera')); }
     else if (act === 'next' || act === 'prev') {
       // Roving focus across the board mirror buttons.
       const btns = [...document.querySelectorAll('#bb-board-mirror button')];
@@ -2208,7 +2261,7 @@ function initKeyboard() {
       Audio.playEvent('tick');
     } else if (e.code === 'Escape' && selection) {
       clearSelectionUI();
-      announce('Selection cleared.');
+      announce(t('an.cleared'));
     }
   });
 }
@@ -2254,28 +2307,29 @@ function updateMirror() {
   if (!session || appPhase !== 'game') return;
   const st = session.state;
   const h = document.createElement('h2');
-  h.textContent = 'Board';
+  h.textContent = t('mirror.title');
   host.appendChild(h);
   const origins = legalOrigins();
   for (let i = 0; i < Rules.POINTS; i++) {
     const cell = st.points[i];
     const btn = document.createElement('button');
     btn.type = 'button';
-    const owner = cell.owner < 0 ? 'empty' : `${cell.count} of ${seatName(cell.owner)}`;
+    const owner = cell.owner < 0 ? t('mirror.empty')
+      : cell.owner === 0 ? t('mirror.mine', { n: cell.count }) : t('mirror.owner', { n: cell.count, who: seatName(cell.owner) });
     const dist = Rules.distanceOf(st.cfg.ruleset, st.cfg.players, 0, i);
-    btn.textContent = `Point ${i + 1}: ${owner}, distance ${dist} for you`;
+    btn.textContent = t('mirror.point', { n: i + 1, owner, d: dist });
     if (origins.some((o) => o.from === i)) btn.dataset.origin = '1';
     btn.addEventListener('click', () => handlePick({ kind: 'point', point: i }));
     host.appendChild(btn);
   }
   const rail = document.createElement('button');
   rail.type = 'button';
-  rail.textContent = `Rail: ${st.rail[0]} of yours, ${st.rail.slice(1).reduce((a, n) => a + n, 0)} rival`;
+  rail.textContent = t('mirror.rail', { mine: st.rail[0], rival: st.rail.slice(1).reduce((a, n) => a + n, 0) });
   rail.addEventListener('click', () => handlePick({ kind: 'rail' }));
   host.appendChild(rail);
   const off = document.createElement('button');
   off.type = 'button';
-  off.textContent = `Bear-off tray: ${st.off[0]} of yours off`;
+  off.textContent = t('mirror.off', { n: st.off[0] });
   off.addEventListener('click', () => handlePick({ kind: 'off' }));
   host.appendChild(off);
 }
@@ -2284,16 +2338,16 @@ function updateMirror() {
 
 function updateTutorialCard() {
   const card = $('#bb-tutorial-card');
-  const t = session?.tutorial;
-  if (!session || !t || t.done || session.over || appPhase !== 'game') {
+  const tut = session?.tutorial;
+  if (!session || !tut || tut.done || session.over || appPhase !== 'game') {
     card.hidden = true;
     return;
   }
-  const step = session.def.tutorial.steps[t.step];
+  const step = session.def.tutorial.steps[tut.step];
   if (!step) { card.hidden = true; return; }
   card.hidden = false;
-  const times = step.times ? ` (${Math.min(t.count + 1, step.times)}/${step.times})` : '';
-  $('#bb-tutorial-text').textContent = step.text + times;
+  const times = step.times ? ` (${Math.min(tut.count + 1, step.times)}/${step.times})` : '';
+  $('#bb-tutorial-text').textContent = t(`ls.${session.def.id}.${tut.step}`, null, step.text) + times;
 }
 
 // --- pause -------------------------------------------------------------------
@@ -2304,12 +2358,12 @@ function togglePause() {
   if (overlay.hidden) {
     session.pause();
     overlay.hidden = false;
-    announce('Game paused.');
+    announce(t('an.paused'));
     $('#bb-btn-resume').focus();
   } else {
     overlay.hidden = true;
     session.resume();
-    announce('Game resumed.');
+    announce(t('an.resumed'));
     $('#bb-btn-pause').focus();
   }
 }
@@ -2319,8 +2373,8 @@ function undoMove() {
   if (session.undo()) {
     Audio.playEvent('undo', session.log.length);
     updateAfterStateChange();
-    announce('Undone. It is your roll again.');
-    toast('Undone.');
+    announce(t('an.undone'));
+    toast(t('toast.undone'));
   }
 }
 
@@ -2338,6 +2392,9 @@ function hudVisible(on) {
   }
 }
 
+// Re-renders the visible menu screen after a language change (set by each show*()).
+let viewRefresh = null;
+
 function setScreen(html) {
   hudVisible(false);
   $('#bb-pause-overlay').hidden = true;
@@ -2346,6 +2403,7 @@ function setScreen(html) {
 }
 
 function enterGameUI() {
+  viewRefresh = null;
   screenEl.innerHTML = '';
   hudVisible(true);
   appPhase = 'game';
@@ -2360,6 +2418,7 @@ function starsText(n) {
 
 function showTitle() {
   appPhase = 'title';
+  viewRefresh = showTitle;
   Audio.stopMusic();
   Audio.stopAmbience();
   const snap = readJSON(STORE_SNAPSHOT, null);
@@ -2373,25 +2432,25 @@ function showTitle() {
     <div class="bb-title-block">
       <img class="bb-key-art" src="assets/key-art.webp" alt="" width="1200" height="672" decoding="async" onerror="this.hidden=true" />
       <h1 class="bb-game-title">Bearing Board</h1>
-      <p class="bb-tagline">A travel-board dice race of wood, leather, and brass.</p>
-      <p class="bb-tagline">${esc(platform.profileName || settings.profile.name)} · ${esc(m.title)} · ${m.stars}★ · ${achCount}/${Content.ACHIEVEMENTS.length} achievements</p>
+      <p class="bb-tagline">${esc(t('title.tagline'))}</p>
+      <p class="bb-tagline">${esc(t('title.stats', { name: platform.profileName || profileName(), title: m.title, stars: m.stars, a: achCount, total: Content.ACHIEVEMENTS.length }))}</p>
     </div>
-    <nav class="bb-menu" aria-label="Main menu">
-      ${snap ? `<button class="bb-btn bb-btn-primary" id="m-continue">Continue — ${esc(snap.def?.name || snap.defId || 'saved table')}</button>` : ''}
-      <button class="bb-btn bb-btn-primary" id="m-play">Play now</button>
-      <button class="bb-btn" id="m-daily">Daily Crossing <span class="bb-tile-sub" id="daily-count"></span></button>
-      <button class="bb-btn" id="m-journey">Journey — ${journeyDone}/${Content.JOURNEY.length} stages</button>
-      <button class="bb-btn" id="m-learn">Learn</button>
-      <button class="bb-btn" id="m-challenges">Challenges</button>
-      <button class="bb-btn" id="m-practice">Practice setup</button>
-      <button class="bb-btn" id="m-settings">Settings</button>
-      <button class="bb-btn" id="m-help">Help &amp; rules</button>
+    <nav class="bb-menu" aria-label="${esc(t('menu.aria'))}">
+      ${snap ? `<button class="bb-btn bb-btn-primary" id="m-continue">${esc(t('m.continue', { name: snap.def ? defName(snap.def) : (snap.defId || t('m.savedTable')) }))}</button>` : ''}
+      <button class="bb-btn bb-btn-primary" id="m-play">${esc(t('m.play'))}</button>
+      <button class="bb-btn" id="m-daily">${esc(t('m.daily'))} <span class="bb-tile-sub" id="daily-count"></span></button>
+      <button class="bb-btn" id="m-journey">${esc(t('m.journey', { done: journeyDone, total: Content.JOURNEY.length }))}</button>
+      <button class="bb-btn" id="m-learn">${esc(t('m.learn'))}</button>
+      <button class="bb-btn" id="m-challenges">${esc(t('m.challenges'))}</button>
+      <button class="bb-btn" id="m-practice">${esc(t('m.practice'))}</button>
+      <button class="bb-btn" id="m-settings">${esc(t('m.settings'))}</button>
+      <button class="bb-btn" id="m-help">${esc(t('m.help'))}</button>
       ${account.signedIn ? `<button class="bb-btn" id="m-invite">${esc(ACCOUNT.invite)}</button>` : ''}
       ${account.canSignIn() ? `<button class="bb-btn" id="m-sign-in">${esc(ACCOUNT.signIn)}</button>` : ''}
     </nav>
     <section class="bb-section">
-      <h2>Today’s table ${dailyDone ? '<span class="bb-badge bb-on">finished</span>' : ''}</h2>
-      <p>${esc(dailyDef.blurb)}</p>
+      <h2>${esc(t('today.title'))} ${dailyDone ? `<span class="bb-badge bb-on">${esc(t('badge.finished'))}</span>` : ''}</h2>
+      <p>${esc(defBlurb(dailyDef))}</p>
     </section>
   `);
 
@@ -2420,7 +2479,7 @@ function updateDailyCountdown() {
     const now = platform.now();
     const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
     const ms = next - now;
-    el.textContent = `· new in ${Math.floor(ms / 3600000)}h ${Math.floor(ms / 60000) % 60}m`;
+    el.textContent = t('daily.newIn', { h: Math.floor(ms / 3600000), m: Math.floor(ms / 60000) % 60 });
   };
   tick();
   dailyCountTimer = setInterval(tick, 30000);
@@ -2429,13 +2488,13 @@ function updateDailyCountdown() {
 function resumeSnapshot() {
   const snap = readJSON(STORE_SNAPSHOT, null);
   if (!snap?.def || !snap?.cfg || !Array.isArray(snap.log)) {
-    toast('No saved table found.');
+    toast(t('toast.noSaved'));
     return;
   }
   const s = new Session(snap.def, { humanSeats: [0], thinkingMs: snap.thinkingMs || 0 });
   s.start(snap);
   if (s.log.length !== snap.log.length) {
-    toast('Saved table was damaged — starting fresh.');
+    toast(t('toast.damaged'));
     s.log = [];
   }
   launchSession(s, 'resumed');
@@ -2445,21 +2504,22 @@ function resumeSnapshot() {
 
 function showJourney() {
   appPhase = 'mode-select';
-  let html = `<h1>Journey</h1><p class="bb-tagline">Forty authored tables across five chapters. Mastery stage closes each chapter.</p><div class="bb-grid">`;
+  viewRefresh = showJourney;
+  let html = `<h1>${esc(t('journey.title'))}</h1><p class="bb-tagline">${esc(t('journey.desc'))}</p><div class="bb-grid">`;
   let lastChapter = -1;
   Content.JOURNEY.forEach((def, i) => {
     if (def.chapter !== lastChapter) {
       lastChapter = def.chapter;
-      html += `<h2 class="bb-chapter">${esc(['Departure', 'Open Road', 'Home Stretch', 'Brass Stakes', 'Grand Circuit'][def.chapter])}</h2>`;
+      html += `<h2 class="bb-chapter">${esc(t(`chap.${def.chapter}`))}</h2>`;
     }
     const rec = progress.journey[def.id];
     html += `<button class="bb-tile" data-j="${i}">
-      <span class="bb-tile-name">${esc(def.name)}</span>
-      <span class="bb-tile-sub">${esc(def.blurb)}</span>
-      <span class="bb-stars" aria-label="${rec?.stars || 0} of 3 stars">${starsText(rec?.stars || 0)}</span>
+      <span class="bb-tile-name">${esc(defName(def))}</span>
+      <span class="bb-tile-sub">${esc(defBlurb(def))}</span>
+      <span class="bb-stars" aria-label="${esc(t('stars.aria', { n: rec?.stars || 0 }))}">${starsText(rec?.stars || 0)}</span>
     </button>`;
   });
-  html += `</div><div class="bb-row" style="justify-content:center"><button class="bb-btn" id="back">Back</button></div>`;
+  html += `</div><div class="bb-row" style="justify-content:center"><button class="bb-btn" id="back">${esc(t('btn.back'))}</button></div>`;
   setScreen(html);
   screenEl.querySelectorAll('[data-j]').forEach((btn) => btn.addEventListener('click', () => {
     startGame(Content.JOURNEY[Number(btn.dataset.j)], { humanSeats: [0] });
@@ -2469,15 +2529,16 @@ function showJourney() {
 
 function showLearn() {
   appPhase = 'mode-select';
-  let html = `<h1>Learn</h1><p class="bb-tagline">Six short lessons. One rule at a time — you perform every action yourself.</p><div class="bb-grid">`;
+  viewRefresh = showLearn;
+  let html = `<h1>${esc(t('learn.title'))}</h1><p class="bb-tagline">${esc(t('learn.desc'))}</p><div class="bb-grid">`;
   Content.LESSONS.forEach((def, i) => {
     const done = progress.lessons[def.id]?.done;
     html += `<button class="bb-tile" data-l="${i}">
-      <span class="bb-tile-name">${esc(def.name)} ${done ? '<span class="bb-badge bb-on">done</span>' : ''}</span>
-      <span class="bb-tile-sub">${esc(def.blurb)}</span>
+      <span class="bb-tile-name">${esc(defName(def))} ${done ? `<span class="bb-badge bb-on">${esc(t('badge.done'))}</span>` : ''}</span>
+      <span class="bb-tile-sub">${esc(defBlurb(def))}</span>
     </button>`;
   });
-  html += `</div><div class="bb-row" style="justify-content:center"><button class="bb-btn" id="back">Back</button></div>`;
+  html += `</div><div class="bb-row" style="justify-content:center"><button class="bb-btn" id="back">${esc(t('btn.back'))}</button></div>`;
   setScreen(html);
   screenEl.querySelectorAll('[data-l]').forEach((btn) => btn.addEventListener('click', () => {
     startGame(Content.LESSONS[Number(btn.dataset.l)], { humanSeats: [0] });
@@ -2487,15 +2548,16 @@ function showLearn() {
 
 function showChallenges() {
   appPhase = 'mode-select';
-  let html = `<h1>Challenges</h1><p class="bb-tagline">Constrained tables: move limits, speed targets, altered layouts.</p><div class="bb-grid">`;
+  viewRefresh = showChallenges;
+  let html = `<h1>${esc(t('ch.title'))}</h1><p class="bb-tagline">${esc(t('ch.desc'))}</p><div class="bb-grid">`;
   Content.CHALLENGES.forEach((def, i) => {
     const done = progress.challenges[def.id]?.done;
     html += `<button class="bb-tile" data-c="${i}">
-      <span class="bb-tile-name">${esc(def.name)} ${done ? '<span class="bb-badge bb-on">cleared</span>' : ''}</span>
-      <span class="bb-tile-sub">${esc(def.blurb)}</span>
+      <span class="bb-tile-name">${esc(defName(def))} ${done ? `<span class="bb-badge bb-on">${esc(t('badge.cleared'))}</span>` : ''}</span>
+      <span class="bb-tile-sub">${esc(defBlurb(def))}</span>
     </button>`;
   });
-  html += `</div><div class="bb-row" style="justify-content:center"><button class="bb-btn" id="back">Back</button></div>`;
+  html += `</div><div class="bb-row" style="justify-content:center"><button class="bb-btn" id="back">${esc(t('btn.back'))}</button></div>`;
   setScreen(html);
   screenEl.querySelectorAll('[data-c]').forEach((btn) => btn.addEventListener('click', () => {
     startGame(Content.CHALLENGES[Number(btn.dataset.c)], { humanSeats: [0] });
@@ -2507,42 +2569,49 @@ function showChallenges() {
 
 function showSetup() {
   appPhase = 'mode-select';
+  // A language change relabels the form in place, keeping the player's choices.
+  viewRefresh = () => {
+    applyDom(screenEl);
+    const opts = (sel, fn) => [...$(sel).options].forEach(fn);
+    opts('#f-difficulty', (o) => { o.textContent = `${aiLabel(o.value)} — ${t(`ai.${o.value}.b`)}`; });
+    opts('#f-theme', (o) => { o.textContent = themeLabel(Content.themeByKey(o.value)); });
+  };
   setScreen(`
-    <h1>Practice setup</h1>
+    <h1 data-i18n="setup.title">${esc(t('setup.title'))}</h1>
     <section class="bb-section bb-form">
-      <p class="bb-tagline">Unranked: undo and hints allowed, no effect on rating. Expected duration 10–20 minutes.</p>
+      <p class="bb-tagline" data-i18n="setup.desc">${esc(t('setup.desc'))}</p>
       <div class="bb-field">
-        <label for="f-ruleset">Ruleset</label>
+        <label for="f-ruleset" data-i18n="setup.ruleset">${esc(t('setup.ruleset'))}</label>
         <select id="f-ruleset">
-          <option value="duel">Duel — two travelers, opposite directions, 15 markers</option>
-          <option value="circuit">Circuit — 2–4 caravans chase one loop, 8 markers</option>
+          <option value="duel" data-i18n="setup.duel">${esc(t('setup.duel'))}</option>
+          <option value="circuit" data-i18n="setup.circuit">${esc(t('setup.circuit'))}</option>
         </select>
       </div>
       <div class="bb-field">
-        <label for="f-difficulty">Rival difficulty</label>
+        <label for="f-difficulty" data-i18n="setup.difficulty">${esc(t('setup.difficulty'))}</label>
         <select id="f-difficulty">
-          ${Object.values(AI.DIFFICULTIES).map((d) => `<option value="${d.key}" ${d.key === 'steady' ? 'selected' : ''}>${d.label} — ${d.blurb}</option>`).join('')}
+          ${Object.values(AI.DIFFICULTIES).map((d) => `<option value="${d.key}" ${d.key === 'steady' ? 'selected' : ''}>${esc(aiLabel(d.key))} — ${esc(t(`ai.${d.key}.b`, null, d.blurb))}</option>`).join('')}
         </select>
       </div>
       <div class="bb-field" id="f-players-wrap" hidden>
-        <label for="f-players">Caravans (seats)</label>
+        <label for="f-players" data-i18n="setup.players">${esc(t('setup.players'))}</label>
         <select id="f-players"><option>2</option><option>3</option><option>4</option></select>
       </div>
       <div class="bb-field">
-        <label for="f-humans">Humans at this device</label>
-        <select id="f-humans"><option value="1">1 (vs AI)</option><option value="2">2 (pass-and-play)</option></select>
+        <label for="f-humans" data-i18n="setup.humans">${esc(t('setup.humans'))}</label>
+        <select id="f-humans"><option value="1" data-i18n="setup.h1">${esc(t('setup.h1'))}</option><option value="2" data-i18n="setup.h2">${esc(t('setup.h2'))}</option></select>
       </div>
       <div class="bb-field">
-        <label for="f-theme">Table theme</label>
-        <select id="f-theme">${Content.THEMES.map((t) => `<option value="${t.key}">${t.label}</option>`).join('')}</select>
+        <label for="f-theme" data-i18n="setup.theme">${esc(t('setup.theme'))}</label>
+        <select id="f-theme">${Content.THEMES.map((th) => `<option value="${th.key}">${esc(themeLabel(th))}</option>`).join('')}</select>
       </div>
       <div class="bb-field">
-        <label for="f-seed">Seed (optional — share a number to replay the same dice)</label>
-        <input id="f-seed" type="number" min="0" max="4294967295" placeholder="random" />
+        <label for="f-seed" data-i18n="setup.seed">${esc(t('setup.seed'))}</label>
+        <input id="f-seed" type="number" min="0" max="4294967295" placeholder="${esc(t('setup.random'))}" data-i18n-placeholder="setup.random" />
       </div>
       <div class="bb-row">
-        <button class="bb-btn" id="back">Back</button>
-        <button class="bb-btn bb-btn-primary" id="f-start">Start table</button>
+        <button class="bb-btn" id="back" data-i18n="btn.back">${esc(t('btn.back'))}</button>
+        <button class="bb-btn bb-btn-primary" id="f-start" data-i18n="setup.start">${esc(t('setup.start'))}</button>
       </div>
     </section>
   `);
@@ -2592,8 +2661,7 @@ function launchSession(s, how) {
     updateAfterStateChange();
   } else {
     updateAfterStateChange();
-    const name = s.def.kind === 'learn' ? s.def.name : s.def.name;
-    announce(`${name}. ${s.isHumanTurn() ? 'Your turn — roll the dice.' : 'Rival begins.'}`);
+    announce(t('an.start', { name: defName(s.def), who: s.isHumanTurn() ? t('an.yourTurn') : t('an.rivalBegins') }));
   }
 }
 
@@ -2605,66 +2673,71 @@ function postToLeaderboard(def, res) {
   const line = $('#bb-results-lb');
   if (!line || !account.signedIn || def.kind === 'learn' || session.humanSeats.size !== 1) return;
   line.hidden = false;
-  if (session.lbLine) { line.textContent = session.lbLine; return; }
-  line.textContent = ACCOUNT.lbPosting;
+  // The outcome is kept (not its text) so a language change re-renders it without re-posting.
+  const lbText = (r) => (!r ? ACCOUNT.lbPosting : !r.posted ? ACCOUNT.lbNotPosted : r.rank ? ACCOUNT.lbRank.replace('{rank}', r.rank) : ACCOUNT.lbPosted);
+  line.textContent = lbText(session.lbResult);
+  if (session.lbResult) return;
   const s = session;
   if (!s.lbPost) s.lbPost = account.submitScore(res.winner === 0 ? res.points : 0);
   s.lbPost.then((r) => {
-    s.lbLine = !r.posted ? ACCOUNT.lbNotPosted : r.rank ? ACCOUNT.lbRank.replace('{rank}', r.rank) : ACCOUNT.lbPosted;
+    s.lbResult = r;
     const el = $('#bb-results-lb');
-    if (el && session === s) el.textContent = s.lbLine;
+    if (el && session === s) el.textContent = lbText(r);
   });
 }
 
-function showResults() {
+function goalLabel(g) { return t(`goal.${g.key}`, g.vars || {}, g.label); }
+
+function showResults(rerender = false) {
   if (!session?.result) return;
   appPhase = 'results';
+  viewRefresh = () => showResults(true);
   $('#bb-cube-overlay').hidden = true;
   $('#bb-tutorial-card').hidden = true;
   const { def, result: res, goalReport: rep, state } = session;
   const won = rep.won;
-  Audio.playEvent(won ? 'win' : 'lose');
+  if (!rerender) Audio.playEvent(won ? 'win' : 'lose');
   const markers = Rules.RULESETS[state.cfg.ruleset].markers;
 
   const rows = res.breakdown.map((b) =>
-    `<tr><td>${esc(b.label)}</td><td>${esc(b.value)}</td></tr>`).join('');
+    `<tr><td>${esc(t(`bd.${b.key}`, null, b.label))}</td><td>${esc(b.value)}</td></tr>`).join('');
   const goals = rep.items.map((g) =>
-    `<tr><td>${g.met ? '✓' : '✗'} ${esc(g.label)}</td><td>${g.met ? 'met' : 'missed'}</td></tr>`).join('');
+    `<tr><td>${g.met ? '✓' : '✗'} ${esc(goalLabel(g))}</td><td>${esc(t(g.met ? 'res.met' : 'res.missed'))}</td></tr>`).join('');
   const stars = def.kind === 'journey' ? starsFor(def, rep, state, session.thinkingMs) : 0;
-  if (stars > 0) setTimeout(() => Audio.playEvent('stars', stars), settings.reducedMotion ? 300 : 900);
+  if (stars > 0 && !rerender) setTimeout(() => Audio.playEvent('stars', stars), settings.reducedMotion ? 300 : 900);
   const newAch = session.newAchievements || [];
 
   let nextBtn = '';
   if (def.kind === 'journey') {
     const idx = Content.JOURNEY.findIndex((j) => j.id === def.id);
-    if (idx >= 0 && idx < Content.JOURNEY.length - 1) nextBtn = `<button class="bb-btn bb-btn-primary" id="r-next">Next stage</button>`;
+    if (idx >= 0 && idx < Content.JOURNEY.length - 1) nextBtn = `<button class="bb-btn bb-btn-primary" id="r-next">${esc(t('btn.nextStage'))}</button>`;
   } else if (def.kind === 'learn') {
     const idx = Content.LESSONS.findIndex((j) => j.id === def.id);
-    if (idx >= 0 && idx < Content.LESSONS.length - 1) nextBtn = `<button class="bb-btn bb-btn-primary" id="r-next">Next lesson</button>`;
+    if (idx >= 0 && idx < Content.LESSONS.length - 1) nextBtn = `<button class="bb-btn bb-btn-primary" id="r-next">${esc(t('btn.nextLesson'))}</button>`;
   }
 
   setScreen(`
     <img class="bb-result-art" src="assets/${won ? 'results-victory' : 'results-road'}.webp" alt="" width="640" height="400" decoding="async" onerror="this.hidden=true" />
-    <h1 class="bb-headline">${won ? 'Victory!' : 'The road goes on'}</h1>
-    <p class="bb-center bb-tagline">${esc(def.name)} · ${esc(seatName(res.winner))} wins by ${esc(res.reason)} · ${state.turnNum} turns · ${fmtClock(session.thinkingMs)} thinking</p>
-    ${def.kind === 'journey' ? `<p class="bb-center bb-stars" style="font-size:1.6rem" aria-label="${stars} of 3 stars">${starsText(stars)}</p>` : ''}
+    <h1 class="bb-headline">${esc(t(won ? 'res.victory' : 'res.road'))}</h1>
+    <p class="bb-center bb-tagline">${esc(t(res.winner === 0 ? 'res.lineYou' : 'res.line', { name: defName(def), who: seatName(res.winner), reason: t(`reason.${res.reason}`, null, res.reason), turns: state.turnNum, time: fmtClock(session.thinkingMs) }))}</p>
+    ${def.kind === 'journey' ? `<p class="bb-center bb-stars" style="font-size:1.6rem" aria-label="${esc(t('stars.aria', { n: stars }))}">${starsText(stars)}</p>` : ''}
     <section class="bb-section">
-      <h2>Score breakdown</h2>
+      <h2>${esc(t('res.breakdown'))}</h2>
       <table class="bb-score-table"><tbody>${rows}</tbody></table>
-      <p class="bb-tagline">Strikes: you ${state.stats.hits[0]} · rivals ${state.stats.hits.slice(1).reduce((a, b) => a + b, 0)} · Borne off: you ${state.off[0]}/${markers}</p>
+      <p class="bb-tagline">${esc(t('res.strikes', { mine: state.stats.hits[0], theirs: state.stats.hits.slice(1).reduce((a, b) => a + b, 0), off: state.off[0], total: markers }))}</p>
     </section>
-    ${goals ? `<section class="bb-section"><h2>Goals</h2><table class="bb-score-table"><tbody>${goals}</tbody></table></section>` : ''}
-    ${newAch.length ? `<section class="bb-section"><h2>Achievements</h2>${newAch.map((a) => `<p><span class="bb-badge bb-on">${esc(a.label)}</span> ${esc(a.desc)}</p>`).join('')}</section>` : ''}
+    ${goals ? `<section class="bb-section"><h2>${esc(t('res.goals'))}</h2><table class="bb-score-table"><tbody>${goals}</tbody></table></section>` : ''}
+    ${newAch.length ? `<section class="bb-section"><h2>${esc(t('res.achievements'))}</h2>${newAch.map((a) => `<p><span class="bb-badge bb-on">${esc(achLabel(a))}</span> ${esc(achDesc(a))}</p>`).join('')}</section>` : ''}
     <section class="bb-section">
-      <h2>Mastery</h2>
-      <p>${esc(masteryTitle().title)} · ${masteryTitle().stars} journey stars</p>
-      <p class="bb-tagline">Seed ${state.cfg.seed} · rules v${Rules.RULES_VERSION} · content v${Content.CONTENT_VERSION}</p>
-      <button class="bb-btn" id="r-replay">Copy replay envelope</button>
+      <h2>${esc(t('res.mastery'))}</h2>
+      <p>${esc(t('res.masteryLine', { title: masteryTitle().title, stars: masteryTitle().stars }))}</p>
+      <p class="bb-tagline">${esc(t('res.versions', { seed: state.cfg.seed, r: Rules.RULES_VERSION, c: Content.CONTENT_VERSION }))}</p>
+      <button class="bb-btn" id="r-replay">${esc(t('res.copyReplay'))}</button>
     </section>
     <p class="bb-center bb-tagline" id="bb-results-lb" hidden></p>
     <div class="bb-row" style="justify-content:center">
-      <button class="bb-btn" id="r-menu">Menu</button>
-      <button class="bb-btn" id="r-retry">Retry</button>
+      <button class="bb-btn" id="r-menu">${esc(t('btn.menu'))}</button>
+      <button class="bb-btn" id="r-retry">${esc(t('btn.retry'))}</button>
       ${nextBtn}
     </div>
   `);
@@ -2688,54 +2761,74 @@ function showResults() {
     const env = JSON.stringify(session.replayEnvelope());
     try {
       await navigator.clipboard.writeText(env);
-      toast('Replay envelope copied.');
+      toast(t('toast.replayCopied'));
     } catch (_) {
-      toast(`Replay hash: ${session.replayEnvelope().finalHash}`);
+      toast(t('toast.replayHash', { h: session.replayEnvelope().finalHash }));
     }
   });
-  $('#r-retry').focus();
+  if (!rerender) $('#r-retry').focus();
 }
 
 // --- settings ----------------------------------------------------------------------
 
+function keyBindingsHtml() {
+  const k = (label, html) => `${esc(t(label))} ${html}`;
+  const kbd = (s) => `<span class="bb-kbd">${esc(s)}</span>`;
+  return [
+    k('key.roll', kbd(keyLabel('roll'))), k('key.undo', kbd(keyLabel('undo'))), k('key.hint', kbd(keyLabel('hint'))),
+    k('key.pause', kbd(keyLabel('pause'))), k('key.camera', kbd(keyLabel('cameraReset'))),
+    k('key.navigate', kbd(keyLabel('prev')) + kbd(keyLabel('next'))), k('key.confirm', kbd('Enter')),
+  ].join(' · ');
+}
+
 function showSettings(returnTo = 'title') {
   appPhase = 'settings';
+  // A language change relabels Settings in place (the Language control keeps focus).
+  viewRefresh = () => {
+    applyDom(screenEl);
+    $('#s-keys').innerHTML = keyBindingsHtml();
+    [...$('#s-theme').options].forEach((o) => { o.textContent = themeLabel(Content.themeByKey(o.value)); });
+    const name = $('#s-name');
+    if (name && document.activeElement !== name) name.value = settings.profile.name === DEFAULT_SETTINGS.profile.name ? profileName() : settings.profile.name;
+    renderGraphicsSection();
+  };
+  const L = (key) => `data-i18n="${key}">${esc(t(key))}`;
   setScreen(`
-    <h1>Settings</h1>
+    <h1 ${L('set.title')}</h1>
     <section class="bb-section bb-form">
-      <h2>Audio</h2>
-      <div class="bb-check"><input type="checkbox" id="s-audio" ${settings.audioEnabled ? 'checked' : ''} /><label for="s-audio">Audio enabled</label></div>
+      <h2 ${L('set.audio')}</h2>
+      <div class="bb-check"><input type="checkbox" id="s-audio" ${settings.audioEnabled ? 'checked' : ''} /><label for="s-audio" ${L('set.audioEnabled')}</label></div>
       ${['music', 'effects', 'ambience', 'voice'].map((bus) => `
-        <div class="bb-field"><label for="s-vol-${bus}">${bus[0].toUpperCase() + bus.slice(1)} volume</label>
+        <div class="bb-field"><label for="s-vol-${bus}" ${L(`set.vol.${bus}`)}</label>
         <input type="range" id="s-vol-${bus}" min="0" max="100" value="${Math.round(settings.volume[bus] * 100)}" /></div>`).join('')}
     </section>
     <section class="bb-section bb-form" id="s-gfx-section" aria-labelledby="s-gfx-title">
       <div id="s-gfx-body" class="bb-form"></div>
-      <div class="bb-field"><label for="s-theme">Default theme</label>
-        <select id="s-theme">${Content.THEMES.map((t) => `<option value="${t.key}" ${settings.theme === t.key ? 'selected' : ''}>${t.label}</option>`).join('')}</select></div>
+      <div class="bb-field"><label for="s-theme" ${L('set.theme')}</label>
+        <select id="s-theme">${Content.THEMES.map((th) => `<option value="${th.key}" ${settings.theme === th.key ? 'selected' : ''}>${esc(themeLabel(th))}</option>`).join('')}</select></div>
     </section>
     <section class="bb-section bb-form">
-      <h2>Accessibility &amp; controls</h2>
-      <div class="bb-check"><input type="checkbox" id="s-rm" ${settings.reducedMotion ? 'checked' : ''} /><label for="s-rm">Reduced motion (no camera swoops, shake, or particles)</label></div>
-      <div class="bb-check"><input type="checkbox" id="s-hc" ${settings.highContrast ? 'checked' : ''} /><label for="s-hc">High contrast palette</label></div>
-      <div class="bb-check"><input type="checkbox" id="s-bt" ${settings.bigText ? 'checked' : ''} /><label for="s-bt">Larger text</label></div>
-      <div class="bb-check"><input type="checkbox" id="s-lh" ${settings.leftHanded ? 'checked' : ''} /><label for="s-lh">Left-handed layout</label></div>
-      <div class="bb-check"><input type="checkbox" id="s-hap" ${settings.haptics ? 'checked' : ''} /><label for="s-hap">Haptics (vibration on strikes)</label></div>
-      <div class="bb-check"><input type="checkbox" id="s-ts" ${settings.toggleSelect ? 'checked' : ''} /><label for="s-ts">Tap-to-select (off = press-and-hold to drag)</label></div>
-      <div class="bb-field"><label for="s-ta">Timing assistance in timed challenges</label>
+      <h2 ${L('set.access')}</h2>
+      <div class="bb-check"><input type="checkbox" id="s-rm" ${settings.reducedMotion ? 'checked' : ''} /><label for="s-rm" ${L('set.rm')}</label></div>
+      <div class="bb-check"><input type="checkbox" id="s-hc" ${settings.highContrast ? 'checked' : ''} /><label for="s-hc" ${L('set.hc')}</label></div>
+      <div class="bb-check"><input type="checkbox" id="s-bt" ${settings.bigText ? 'checked' : ''} /><label for="s-bt" ${L('set.bt')}</label></div>
+      <div class="bb-check"><input type="checkbox" id="s-lh" ${settings.leftHanded ? 'checked' : ''} /><label for="s-lh" ${L('set.lh')}</label></div>
+      <div class="bb-check"><input type="checkbox" id="s-hap" ${settings.haptics ? 'checked' : ''} /><label for="s-hap" ${L('set.hap')}</label></div>
+      <div class="bb-check"><input type="checkbox" id="s-ts" ${settings.toggleSelect ? 'checked' : ''} /><label for="s-ts" ${L('set.ts')}</label></div>
+      <div class="bb-field"><label for="s-ta" ${L('set.ta')}</label>
         <select id="s-ta">${[1, 1.5, 2].map((m) => `<option value="${m}" ${settings.timingAssist === m ? 'selected' : ''}>${m}×</option>`).join('')}</select></div>
-      <h3>Keyboard bindings</h3>
-      <p>Roll <span class="bb-kbd">${esc(keyLabel('roll'))}</span> · Undo <span class="bb-kbd">${esc(keyLabel('undo'))}</span> · Hint <span class="bb-kbd">${esc(keyLabel('hint'))}</span> · Pause <span class="bb-kbd">${esc(keyLabel('pause'))}</span> · Camera reset <span class="bb-kbd">${esc(keyLabel('cameraReset'))}</span> · Navigate <span class="bb-kbd">${esc(keyLabel('prev'))}</span><span class="bb-kbd">${esc(keyLabel('next'))}</span> · Confirm <span class="bb-kbd">Enter</span></p>
-      <h3>Profile</h3>
-      <div class="bb-field"><label for="s-name">Display name (guest — local only)</label>
-        <input type="text" id="s-name" maxlength="24" value="${esc(settings.profile.name)}" /></div>
-      <h3>Data</h3>
+      <h3 ${L('set.keys')}</h3>
+      <p id="s-keys">${keyBindingsHtml()}</p>
+      <h3 ${L('set.profile')}</h3>
+      <div class="bb-field"><label for="s-name" ${L('set.name')}</label>
+        <input type="text" id="s-name" maxlength="24" value="${esc(settings.profile.name === DEFAULT_SETTINGS.profile.name ? profileName() : settings.profile.name)}" /></div>
+      <h3 ${L('set.data')}</h3>
       <div class="bb-row">
-        <button class="bb-btn" id="s-tutorial-reset">Replay tutorials</button>
-        <button class="bb-btn bb-btn-danger" id="s-wipe">Reset all progress</button>
+        <button class="bb-btn" id="s-tutorial-reset" ${L('set.replayTut')}</button>
+        <button class="bb-btn bb-btn-danger" id="s-wipe" ${L('set.wipe')}</button>
       </div>
     </section>
-    <div class="bb-row" style="justify-content:center"><button class="bb-btn bb-btn-primary" id="s-back">Done</button></div>
+    <div class="bb-row" style="justify-content:center"><button class="bb-btn bb-btn-primary" id="s-back" ${L('btn.done')}</button></div>
   `);
 
   const change = (id, fn) => $(id).addEventListener('change', (e) => { fn(e.target); saveSettings(); applySettings(); funnel.track('settings_change', id.slice(2)); });
@@ -2753,19 +2846,20 @@ function showSettings(returnTo = 'title') {
   change('#s-ts', (t) => { settings.toggleSelect = t.checked; });
   change('#s-ta', (t) => { settings.timingAssist = Number(t.value); });
   $('#s-name').addEventListener('change', (e) => {
-    settings.profile.name = e.target.value.trim() || 'Guest Traveler';
+    const v = e.target.value.trim();
+    settings.profile.name = !v || v === t('profile.default') ? DEFAULT_SETTINGS.profile.name : v;
     saveSettings();
   });
   $('#s-tutorial-reset').addEventListener('click', () => {
     progress.lessons = {};
     saveProgress();
-    toast('Tutorials will play again.');
+    toast(t('toast.tutReset'));
   });
   $('#s-wipe').addEventListener('click', () => {
     progress = structuredClone(DEFAULT_PROGRESS);
     saveProgress();
     storage.removeItem(STORE_SNAPSHOT);
-    toast('Progress reset.');
+    toast(t('toast.wiped'));
   });
   $('#s-back').addEventListener('click', () => {
     if (returnTo === 'pause' && session && !session.over) {
@@ -2779,7 +2873,7 @@ function showSettings(returnTo = 'title') {
 
 // --- graphics settings section -------------------------------------------------------
 
-const GFX_L = gfxStrings(pickLocale(typeof navigator !== 'undefined' ? navigator.languages || [navigator.language] : []));
+let GFX_L = gfxStrings(getLang());
 let gfxSummaryTimer = 0;
 
 function graphicsSummary() {
@@ -2872,28 +2966,17 @@ function refreshGraphicsSummary() {
 
 function showHelp(returnTo = 'title') {
   appPhase = 'help';
+  viewRefresh = () => showHelp(returnTo);
   const theme = Content.themeByKey(settings.theme);
   const legend = theme.players.slice(0, 4).map((c, i) =>
-    `<span class="bb-badge"><span class="bb-swatch" style="background:#${c.toString(16).padStart(6, '0')}"></span> ${i === 0 ? 'You (light discs)' : `Rival ${i}`}</span>`).join('');
+    `<span class="bb-badge"><span class="bb-swatch" style="background:#${c.toString(16).padStart(6, '0')}"></span> ${esc(i === 0 ? t('help.you') : t('help.rival', { n: i }))}</span>`).join('');
+  // h.*.html values are trusted markup from js/i18n-*.js.
+  const sec = (k, extra = '') => `<section class="bb-section"><h2>${esc(t(`h.${k}.t`))}</h2>${extra}<p>${t(`h.${k}.html`)}</p></section>`;
   setScreen(`
-    <h1>Help &amp; rules</h1>
-    <section class="bb-section"><h2>The road</h2>
-      <p>Your markers travel a track of 24 triangular points, then leave the board. In a <strong>Duel</strong> you cross the whole board while your rival comes the other way. In a <strong>Circuit</strong>, every caravan chases the same loop from its own gate. First to bear everything off wins.</p></section>
-    <section class="bb-section"><h2>Dice</h2>
-      <p>Roll two dice; each die moves one marker. Doubles grant four moves. You must use every die you can, and if only one die of a mixed roll can be played it must be the higher one. If nothing can move, you pass.</p></section>
-    <section class="bb-section"><h2>Strikes &amp; the rail</h2>
-      <p>A lone marker on a point is a blot. Landing on it strikes it to the rail in the middle. While any marker of yours sits on the rail, it must re-enter — in the rival home stretch — before anything else may move.</p></section>
-    <section class="bb-section"><h2>Bearing off</h2>
-      <p>Once every marker is inside your home stretch (the last six points), dice can carry markers off the board. An oversized die may bear off only from your farthest occupied point.</p></section>
-    <section class="bb-section"><h2>The stakes cube</h2>
-      <p>Before rolling in a duel, you may offer the brass cube to double the stakes. The rival accepts — playing on and taking ownership of the cube — or declines and concedes the current stakes. Score stakes only; no money ever changes hands.</p></section>
-    <section class="bb-section"><h2>Scoring</h2>
-      <p>Match points = stakes value × sweep factor. Bearing off while the rival has borne nothing off doubles the win (full sweep); if they also have a marker on the rail or in your home stretch, it triples (grand sweep). Results always show this breakdown.</p></section>
-    <section class="bb-section"><h2>Controls</h2>
-      <p>Pointer/touch: tap a glowing marker, then a lit destination — or press and drag. Keyboard: <span class="bb-kbd">←</span><span class="bb-kbd">→</span> move through board buttons, <span class="bb-kbd">Enter</span> to use one, <span class="bb-kbd">R</span> roll, <span class="bb-kbd">U</span> undo, <span class="bb-kbd">H</span> hint, <span class="bb-kbd">C</span> camera, <span class="bb-kbd">Esc</span> pause. Gamepad: D-pad to browse, primary to confirm, secondary to cancel, start to pause.</p></section>
-    <section class="bb-section"><h2>Colors</h2><p>${legend}</p>
-      <p>Legal targets glow green; a strike target glows red; the selected marker carries a brass ring. High-contrast and color-vision-safe palettes are in Settings.</p></section>
-    <div class="bb-row" style="justify-content:center"><button class="bb-btn bb-btn-primary" id="h-back">Done</button></div>
+    <h1>${esc(t('help.title'))}</h1>
+    ${sec('road')}${sec('dice')}${sec('strikes')}${sec('bearoff')}${sec('cube')}${sec('scoring')}${sec('controls')}
+    ${sec('colors', `<p>${legend}</p>`)}
+    <div class="bb-row" style="justify-content:center"><button class="bb-btn bb-btn-primary" id="h-back">${esc(t('btn.done'))}</button></div>
   `);
   $('#h-back').addEventListener('click', () => {
     if (returnTo === 'pause' && session && !session.over) {
@@ -2924,7 +3007,7 @@ function wireStaticControls() {
   });
   $('#bb-btn-undo').addEventListener('click', undoMove);
   $('#bb-btn-hint').addEventListener('click', () => session?.hint());
-  $('#bb-btn-skip').addEventListener('click', () => { rendererApi.settle(); announce('Animations settled.'); });
+  $('#bb-btn-skip').addEventListener('click', () => { rendererApi.settle(); announce(t('an.settled')); });
   $('#bb-btn-pause').addEventListener('click', togglePause);
   $('#bb-btn-resume').addEventListener('click', togglePause);
   $('#bb-btn-restart').addEventListener('click', () => {
@@ -2934,7 +3017,7 @@ function wireStaticControls() {
     session.clearPersisted();
     funnel.track('retry', session.def.kind);
     startGame(session.def, { humanSeats: [...session.humanSeats] });
-    toast('Table restarted.');
+    toast(t('toast.restarted'));
   });
   $('#bb-btn-pause-settings').addEventListener('click', () => {
     $('#bb-pause-overlay').hidden = true;
@@ -2971,7 +3054,7 @@ function wireStaticControls() {
     if (session.def.kind === 'learn') {
       progress.lessons[session.def.id] = { done: true };
       saveProgress();
-      toast('Lesson complete.');
+      toast(t('toast.lessonDone'));
     }
     Audio.stopMusic();
     showLearn();
@@ -3007,6 +3090,24 @@ function initLifecycle(canvas) {
   });
 }
 
+// Language changed (Settings → Language, or the account preference arrived):
+// js/i18n.js re-applied the static markup; re-render text built here. A table in
+// progress keeps its state, AI timers and renderer.
+function onLanguageChange() {
+  ACCOUNT = accountStrings(getLang());
+  GFX_L = gfxStrings(getLang());
+  if (appPhase === 'game' && session) {
+    updateHUD();
+    updateMirror();
+    updateTutorialCard();
+    updateCubeOverlay();
+  } else if (viewRefresh) {
+    const focusId = document.activeElement?.id;
+    viewRefresh();
+    if (focusId && document.activeElement?.id !== focusId) document.getElementById(focusId)?.focus();
+  }
+}
+
 async function boot() {
   const canvas = $('#bb-canvas');
   try {
@@ -3019,6 +3120,7 @@ async function boot() {
   }
   applySettings();
   wireStaticControls();
+  onLanguage(onLanguageChange);
   initPointer(canvas);
   initKeyboard();
   initGamepad();

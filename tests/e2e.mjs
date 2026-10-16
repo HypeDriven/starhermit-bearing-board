@@ -28,6 +28,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { stubStarHermit, launchToken } from './starhermit-e2e.mjs';
 
 const ROOT = normalize(join(fileURLToPath(import.meta.url), '..', '..'));
 const browserNoise = /GL Driver Message|GPU stall due to ReadPixels|Automatic fallback to software WebGL|EnableWebGLDeveloperExtensions/i;
@@ -58,7 +59,9 @@ function startServer() {
       const url = new URL(req.url, 'http://localhost');
       // Plain static host: a standalone load must never call own-server routes.
       if (url.pathname.startsWith('/api') || url.pathname.startsWith('/ws')) {
-        ownServerHits.push(url.pathname);
+        // Signed-in (stubbed) pages send a bearer token; an unload-time keepalive
+        // save can bypass page.route. Only token-less calls count.
+        if (!req.headers.authorization) ownServerHits.push(url.pathname);
         res.writeHead(404); res.end();
         return;
       }
@@ -84,7 +87,7 @@ const step = async (name, fn) => {
 };
 
 async function runPass(browser, tag, viewport, hasTouch, base, errors) {
-  const context = await browser.newContext({ viewport, hasTouch, isMobile: hasTouch });
+  const context = await browser.newContext({ viewport, hasTouch, isMobile: hasTouch, locale: 'en-US' });
   const page = await context.newPage();
   page.on('pageerror', (e) => errors.push(`[${tag}] pageerror: ${e.message}`));
   page.on('console', (m) => {
@@ -365,6 +368,49 @@ async function runPass(browser, tag, viewport, hasTouch, base, errors) {
     await shot('results');
     await page.click('#r-menu');
     await page.waitForSelector('#m-play', { state: 'visible', timeout: 10000 });
+  });
+
+  await step(`[${tag}] Language: Automatic follows the StarHermit preferred language; Settings → Language re-renders a paused table live and saves ui.language; report a problem`, async () => {
+    const calls = await stubStarHermit(page, { preferredLanguage: 'fr-CA' });
+    await page.goto('about:blank');
+    await page.goto(`${base}/index.html#game_token=${launchToken()}`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.documentElement.lang === 'fr-CA');
+    await page.waitForFunction(() => document.querySelector('#m-play')?.textContent === 'Jouer');
+    await page.click('#m-play');
+    await page.waitForFunction(() => /: (lancer|jouer)$/.test(document.querySelector('#bb-turn-indicator')?.textContent || ''), null, { timeout: 15000 });
+    const turnBefore = (await page.textContent('#bb-rail-progress')).match(/\d+/)[0];
+    await page.click('#bb-btn-pause');
+    await page.waitForSelector('#bb-pause-overlay:not([hidden])');
+    await page.click('#bb-btn-pause-settings');
+    const choice = page.locator('#s-gfx-section [data-game-language="choice"]');
+    await choice.scrollIntoViewIfNeeded();
+    const autoLabel = await choice.locator('option').first().textContent();
+    if (!/^Automatique — Français \(Canada\)$/.test(autoLabel)) throw new Error(`Automatic label not resolved: ${autoLabel}`);
+    await choice.selectOption('it-IT');
+    await page.waitForFunction(() => document.documentElement.lang === 'it-IT');
+    await page.waitForFunction(() => /Salvato/.test(document.querySelector('[data-game-language="status"]').textContent));
+    if (calls.settings['ui.language']?.choice !== 'it-IT') throw new Error('ui.language not saved: ' + JSON.stringify(calls.settings));
+    if ((await page.textContent('#bb-screen h1')) !== 'Impostazioni') throw new Error('settings heading not re-rendered');
+    if ((await page.inputValue('#s-gfx-section [data-game-language="choice"]')) !== 'it-IT') throw new Error('language control lost its value');
+    await page.locator('[data-game-report="title"]').scrollIntoViewIfNeeded();
+    await page.fill('[data-game-report="title"]', 'Test report');
+    await page.click('[data-game-report="send"]');
+    await page.waitForFunction(() => /Grazie/.test(document.querySelector('[data-game-report="status"]').textContent));
+    if (!calls.reports?.[0] || calls.reports[0].kind !== 'bug') throw new Error('report not posted');
+    await shot('language');
+    await page.click('#s-back');
+    await page.waitForSelector('#bb-pause-overlay:not([hidden])');
+    if ((await page.textContent('#bb-pause-title')) !== 'In pausa') throw new Error('pause overlay not re-rendered');
+    if ((await page.textContent('#bb-btn-roll')) !== 'Tira') throw new Error('action tray not re-rendered');
+    if (!/^Tu: (tiro|mossa)$/.test(await page.textContent('#bb-turn-indicator'))) throw new Error('turn indicator not re-rendered');
+    const turnAfter = (await page.textContent('#bb-rail-progress')).match(/\d+/)[0];
+    if (!/^Turno /.test(await page.textContent('#bb-rail-progress')) || turnAfter !== turnBefore) throw new Error('table not kept across the language change');
+    await page.click('#bb-btn-pause-settings');
+    await page.locator('#s-gfx-section [data-game-language="choice"]').selectOption('auto');
+    await page.waitForFunction(() => document.documentElement.lang === 'fr-CA');
+    await page.click('#s-back');
+    await page.click('#bb-btn-leave');
+    await page.waitForFunction(() => document.querySelector('#m-play')?.textContent === 'Jouer');
   });
 
   await context.close();

@@ -8,6 +8,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAccount } from '../js/account.js';
 import { ACCOUNT_STRINGS, LOCALES } from '../js/gfx-strings.js';
+import { mergeProgress } from '../js/progress.js';
+import { STRINGS, LOCALES as UI_LOCALES } from '../js/i18n.js';
+import * as Content from '../js/content.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SLUG = 'bearing-board';
@@ -33,7 +36,12 @@ function boot({ hash = '' } = {}) {
     const u = decodeURIComponent(url);
     if (u.endsWith(`/api/v1/users/${USER}/profile`)) return Response.json({ nickname: 'Rollo' });
     if (u.endsWith(`/cloud-saves/game:${SLUG}`)) {
-      if (method === 'PUT') { cloud.bytes = Buffer.from(JSON.parse(init.body).dataBase64, 'base64'); return new Response(null, { status: 204 }); }
+      if (method === 'PUT') {
+        if (cloud.conflict) { cloud.conflict = false; return Response.json({ etag: '"other"' }, { status: 412 }); }
+        cloud.puts = (cloud.puts || 0) + 1;
+        cloud.bytes = Buffer.from(JSON.parse(init.body).dataBase64, 'base64');
+        return Response.json({ etag: `"v${cloud.puts}"` });
+      }
       return cloud.bytes ? new Response(cloud.bytes) : new Response('', { status: 404 });
     }
     if (u.endsWith(`/games/${SLUG}/settings`)) {
@@ -114,4 +122,58 @@ test('sign-out on refused renewal stops cloud writes', async () => {
 test('account strings exist in every required locale', () => {
   for (const loc of LOCALES)
     for (const k of Object.keys(ACCOUNT_STRINGS['en-US'])) assert.ok(ACCOUNT_STRINGS[loc]?.[k], `${loc}.${k}`);
+});
+
+test('save conflict: a refused write reloads the cloud copy for merging', async () => {
+  const token = jwt({ sub: USER, game_scope: SLUG, exp: Math.floor(Date.now() / 1000) + 3600 });
+  const { acc, SH, cloud } = boot({ hash: `#game_token=${token}` });
+  const remotes = [];
+  acc.onSaveConflict((doc) => remotes.push(doc));
+  await acc.start(KEYS);
+  acc.saveCloud({ data: { stats: { wins: 1 } }, check: 'a' }); await acc.flush();
+  cloud.conflict = true;
+  acc.saveCloud({ data: { stats: { wins: 2 } }, check: 'b' });
+  const other = boot({ hash: `#game_token=${token}` });
+  await other.acc.start(KEYS);
+  const theirs = { data: { stats: { wins: 5 } }, check: 'c' };
+  other.acc.saveCloud(theirs); await other.acc.flush();
+  cloud.bytes = other.cloud.bytes;
+  await acc.flush();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(remotes.length, 1);
+  assert.deepEqual(plain(remotes[0]), theirs);
+  assert.equal(SH.saveConflicted(), false, 'reload lifts the write block');
+});
+
+test('mergeProgress keeps the better record from each device', () => {
+  const m = mergeProgress(
+    { journey: { 'journey-01': { stars: 1, bestTurns: 50 }, 'journey-02': { stars: 2, bestTurns: 70 } }, lessons: { a: { done: true } },
+      daily: { days: ['2026-10-01'], lastDay: '2026-10-01' }, achievements: { first_win: { at: '2026-10-02T00:00:00Z' } }, stats: { games: 9, wins: 1 } },
+    { journey: { 'journey-01': { stars: 3, bestTurns: 60, goalsMet: true } }, challenges: { c: { done: true, best: 40 } },
+      daily: { days: ['2026-10-03'], lastDay: '2026-10-03' }, achievements: { first_win: { at: '2026-10-01T00:00:00Z' } }, stats: { games: 4, wins: 3 } });
+  assert.deepEqual(m.journey['journey-01'], { stars: 3, bestTurns: 50, goalsMet: true });
+  assert.equal(m.journey['journey-02'].stars, 2);
+  assert.equal(m.lessons.a.done, true);
+  assert.deepEqual(m.challenges.c, { done: true, best: 40 });
+  assert.deepEqual(m.daily, { days: ['2026-10-01', '2026-10-03'], lastDay: '2026-10-03' });
+  assert.equal(m.achievements.first_win.at, '2026-10-01T00:00:00Z');
+  assert.deepEqual(m.stats, { games: 9, wins: 3, hits: 0, sweeps: 0 });
+});
+
+test('every player-facing string and content name exists in all nine locales', () => {
+  assert.deepEqual(UI_LOCALES, ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT']);
+  const keys = Object.keys(STRINGS['en-US']);
+  for (const loc of UI_LOCALES) {
+    const T = STRINGS[loc];
+    for (const k of keys) assert.ok(T[k], `${loc}.${k}`);
+    for (const d of Content.JOURNEY) assert.ok(T[`j.${d.id}`] && T[`jb.${d.id}`], `${loc} ${d.id}`);
+    for (const d of Content.LESSONS) {
+      assert.ok(T[`l.${d.id}`] && T[`lb.${d.id}`], `${loc} ${d.id}`);
+      d.tutorial.steps.forEach((_, i) => assert.ok(T[`ls.${d.id}.${i}`], `${loc} ${d.id}.${i}`));
+    }
+    for (const d of Content.CHALLENGES) assert.ok(T[`c.${d.id}`] && T[`cb.${d.id}`], `${loc} ${d.id}`);
+    for (const a of Content.ACHIEVEMENTS) assert.ok(T[`ach.${a.key}`] && T[`ach.${a.key}.d`], `${loc} ${a.key}`);
+    for (const th of Content.THEMES) assert.ok(T[`theme.${th.key}`], `${loc} ${th.key}`);
+    Content.MASTERY_TIERS.forEach((_, i) => assert.ok(T[`tier.${i}`], `${loc} tier ${i}`));
+  }
 });

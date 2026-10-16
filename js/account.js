@@ -64,6 +64,17 @@ export function createAccount(SH) {
       } catch { return { posted: true, rank: null }; }
     },
 
+    /**
+     * fn(remoteDoc) after a cloud write lost to a save made on another device
+     * (the SDK refused the conditional PUT and emitted 'saveconflict'). The
+     * cloud copy is re-read first, which lifts the SDK's write block; the
+     * caller merges it with local progress and saves again.
+     */
+    onSaveConflict(fn) {
+      if (!SH) return () => {};
+      return SH.on('saveconflict', () => { SH.loadJSON().then(fn); });
+    },
+
     reset() { cloudReady = false; pushed = null; },
   };
 }
