@@ -4,6 +4,7 @@
 export const LOCALES = ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT'];
 
 const EN_US = {
+  level: 'Level {level}',
   title: 'Graphics',
   quality: 'Quality',
   auto: 'Auto (detected: {tier})',
@@ -35,6 +36,7 @@ const EN_GB = {
 };
 
 const ES_419 = {
+  level: 'Nivel {level}',
   title: 'Gráficos',
   quality: 'Calidad',
   auto: 'Automática (detectada: {tier})',
@@ -69,6 +71,7 @@ const ES_ES = {
 };
 
 const DE_DE = {
+  level: 'Stufe {level}',
   title: 'Grafik',
   quality: 'Qualität',
   auto: 'Automatisch (erkannt: {tier})',
@@ -95,6 +98,7 @@ const DE_DE = {
 };
 
 const FR_FR = {
+  level: 'Niveau {level}',
   title: 'Graphismes',
   quality: 'Qualité',
   auto: 'Auto (détecté : {tier})',
@@ -127,6 +131,7 @@ const FR_CA = {
 };
 
 const PT_BR = {
+  level: 'Nível {level}',
   title: 'Gráficos',
   quality: 'Qualidade',
   auto: 'Automática (detectada: {tier})',
@@ -153,6 +158,7 @@ const PT_BR = {
 };
 
 const IT_IT = {
+  level: 'Livello {level}',
   title: 'Grafica',
   quality: 'Qualità',
   auto: 'Automatica (rilevata: {tier})',

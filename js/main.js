@@ -819,8 +819,9 @@ function makeLeatherTexture(base = '#7a4a2a') {
 
 // Detailed tier: 512 px seeded leather (mottling, pores, creases) as a colour map plus a
 // matching grey-scale bump map. Deterministic (seeded), never touches the rules RNG.
-function makeLeatherMaps(base) {
-  const N = 512;
+function makeLeatherMaps(base, size = 512) {
+  const N = size, k = N / 512; // pattern authored at 512 px; pores stay 1–2 px, so larger maps are finer
+  const S = 512;
   const c = document.createElement('canvas');
   c.width = c.height = N;
   const g = c.getContext('2d');
@@ -829,13 +830,14 @@ function makeLeatherMaps(base) {
   const gb = b.getContext('2d');
   g.fillStyle = base; g.fillRect(0, 0, N, N);
   gb.fillStyle = '#808080'; gb.fillRect(0, 0, N, N);
+  g.setTransform(k, 0, 0, k, 0, 0); gb.setTransform(k, 0, 0, k, 0, 0);
   const rng = Rules.createRng(Rules.hashSeed('leather:detail'));
   const both = (fn) => { fn(g, false); fn(gb, true); };
   // Broad mottling (wraps across the tile edges so the repeat is seamless).
   for (let i = 0; i < 70; i++) {
-    const x = rng.next() * N, y = rng.next() * N, r = 30 + rng.next() * 90;
+    const x = rng.next() * S, y = rng.next() * S, r = 30 + rng.next() * 90;
     const light = rng.next() > 0.5, a = 0.035 + rng.next() * 0.05;
-    for (const dx of [-N, 0, N]) for (const dy of [-N, 0, N]) {
+    for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) {
       both((ctx, bump) => {
         const grd = ctx.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r);
         const col = bump ? (light ? '255,255,255' : '0,0,0') : (light ? '255,236,200' : '30,14,4');
@@ -846,8 +848,9 @@ function makeLeatherMaps(base) {
       });
     }
   }
-  // Pores.
-  for (let i = 0; i < 16000; i++) {
+  // Pores (native pixels: the count grows with the texture area).
+  g.setTransform(1, 0, 0, 1, 0, 0); gb.setTransform(1, 0, 0, 1, 0, 0);
+  for (let i = 0, n = Math.round(16000 * k * k); i < n; i++) {
     const x = rng.int(N), y = rng.int(N), s = 1 + rng.int(2), dark = rng.next() > 0.35;
     g.fillStyle = `rgba(${dark ? '20,10,2' : '255,240,210'},${0.03 + rng.next() * 0.06})`;
     g.fillRect(x, y, s, s);
@@ -855,8 +858,9 @@ function makeLeatherMaps(base) {
     gb.fillRect(x, y, s, s);
   }
   // Fine creases.
+  g.setTransform(k, 0, 0, k, 0, 0); gb.setTransform(k, 0, 0, k, 0, 0);
   for (let i = 0; i < 90; i++) {
-    let x = rng.next() * N, y = rng.next() * N, a = rng.next() * Math.PI * 2;
+    let x = rng.next() * S, y = rng.next() * S, a = rng.next() * Math.PI * 2;
     const len = 8 + rng.int(26);
     both((ctx, bump) => {
       ctx.strokeStyle = bump ? 'rgba(0,0,0,0.35)' : 'rgba(25,12,4,0.08)';
@@ -881,11 +885,12 @@ function makeLeatherMaps(base) {
 }
 
 // Wood grain (walnut frame, centre bar, table): streaky seeded rings along the u axis.
-function makeWoodTexture(seedKey, rotate = false) {
-  const W = 512, H = 128;
+function makeWoodTexture(seedKey, rotate = false, size = 512) {
+  const W = 512, H = 128, k = size / 512; // authored at 512×128, drawn at the budget's size
   const c = document.createElement('canvas');
-  c.width = W; c.height = H;
+  c.width = Math.round(W * k); c.height = Math.round(H * k);
   const g = c.getContext('2d');
+  g.setTransform(k, 0, 0, k, 0, 0);
   g.fillStyle = '#d6d6d6'; g.fillRect(0, 0, W, H);
   const rng = Rules.createRng(Rules.hashSeed(`wood:${seedKey}`));
   for (let i = 0; i < 150; i++) {
@@ -915,9 +920,9 @@ function makeWoodTexture(seedKey, rotate = false) {
 }
 
 // Bevelled marker: rounded rims and a shallow groove inside the brass ring.
-function makeMarkerGeometry(detailed) {
+function makeMarkerGeometry(detailed, segments = 32) {
   const R = LAYOUT.markR, H = LAYOUT.markH;
-  if (!detailed) return new THREE.CylinderGeometry(R, R, H, 22);
+  if (!detailed) return new THREE.CylinderGeometry(R, R, H, Math.min(22, segments));
   const pts = [];
   const bev = 0.035;
   pts.push(new THREE.Vector2(0, -H / 2));
@@ -934,7 +939,7 @@ function makeMarkerGeometry(detailed) {
   pts.push(new THREE.Vector2(R * 0.5, H / 2 - 0.012));
   pts.push(new THREE.Vector2(R * 0.44, H / 2 - 0.004));
   pts.push(new THREE.Vector2(0, H / 2 - 0.004));
-  return new THREE.LatheGeometry(pts, 32);
+  return new THREE.LatheGeometry(pts, segments);
 }
 
 function createRenderer(canvas) {
@@ -946,6 +951,7 @@ function createRenderer(canvas) {
   let gfx = Gfx.resolve({ preset: 'low' }, 'low');
   let gfxSavedJson = null;
   let gpu = '';
+  let gpuLevel = 0;
   let detected = 'balanced';
   let composer = null;
   let postKey = null;
@@ -962,6 +968,7 @@ function createRenderer(canvas) {
   let hemiLight = null;
   let motes = null;
   let markerGeo = null;
+  let mergedMarkerGeos = []; // per player: marker + cap ring in one geometry (budget.mergedRing)
   let ringMat = null;
   let motionT = 0;
   let contextLost = false;
@@ -979,17 +986,24 @@ function createRenderer(canvas) {
   let selPulse = 0;
 
   // Particles (bounded pool)
-  const MAX_PARTICLES = 240;
+  const MAX_PARTICLES = 480; // largest budget pool; the preset's budget caps the live cursor range
   let particles = null;
 
   function init() {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'default' });
+    // StarHermit hardware level (gpu-level.js) → Auto preset: Low 0, Balanced 4, High 10, Ultra 17.
     try {
-      const gl = renderer.getContext();
-      const ext = gl.getExtension('WEBGL_debug_renderer_info');
-      gpu = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '');
-    } catch (_) { gpu = ''; }
-    detected = Gfx.detectPreset(gpu, { mobile: isMobileDevice() });
+      if (window.StarHermitGpu) {
+        const info = window.StarHermitGpu.info();
+        gpu = String(info.gpu || ''); gpuLevel = info.level;
+      } else {
+        const gl = renderer.getContext();
+        const ext = gl.getExtension('WEBGL_debug_renderer_info');
+        gpu = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '');
+        gpuLevel = Gfx.detectLevel(gpu, { mobile: isMobileDevice() });
+      }
+    } catch (_) { gpu = ''; gpuLevel = 0; }
+    detected = Gfx.presetForLevel(gpuLevel);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
@@ -1077,17 +1091,24 @@ function createRenderer(canvas) {
     scene.background = new THREE.Color(theme.sky);
     scene.fog = new THREE.Fog(theme.fog, 18, 34);
     const detailed = gfx.detail === 'detailed';
+    const B = gfx.budget;
     playerMats.forEach((m) => m.dispose());
     ringMat?.dispose();
-    playerMats = theme.players.map((color, i) => (detailed
+    playerMats = theme.players.map((color, i) => (B.material === 'lambert' && !detailed
+      ? new THREE.MeshLambertMaterial({ color })
+      : detailed && B.material === 'physical'
       ? new THREE.MeshPhysicalMaterial({
         color, roughness: 0.4, metalness: 0, clearcoat: 0.6, clearcoatRoughness: 0.22,
         envMapIntensity: i === 0 ? 0.25 : 0.4,
       })
-      : new THREE.MeshStandardMaterial({ color, roughness: 0.32, metalness: i === 0 ? 0.05 : 0.12 })));
+      : new THREE.MeshStandardMaterial({ color, roughness: detailed ? 0.36 : 0.32, metalness: i === 0 ? 0.05 : 0.12, envMapIntensity: i === 0 ? 0.25 : 0.4 })));
     ringMat = new THREE.MeshStandardMaterial({ color: theme.accent, roughness: detailed ? 0.3 : 0.35, metalness: 0.8, envMapIntensity: 0.6 });
     markerGeo?.dispose();
-    markerGeo = makeMarkerGeometry(detailed);
+    markerGeo = makeMarkerGeometry(detailed, B.segments);
+    mergedMarkerGeos.forEach((g) => g.dispose());
+    mergedMarkerGeos = B.mergedRing ? theme.players.map((color) => mergeRing(markerGeo, color, theme.accent)) : [];
+    // Merged markers carry their body and ring colours per vertex; the material colour goes white.
+    if (B.mergedRing) playerMats.forEach((m) => { m.vertexColors = true; m.color.set(0xffffff); });
     rebuildBoard();
     // Rebuild markers too, so a theme or detail change recolours pieces already on the table.
     if (lastState) rebuildMarkers(lastState);
@@ -1130,30 +1151,43 @@ function createRenderer(canvas) {
     let frameMat, frameMatSide, feltMat, railMat, tableMat, pointTex = null;
     // The field sits a shade darker than the theme felt so the light points stand out.
     const feltHex = hex(new THREE.Color(theme.felt).lerp(new THREE.Color(theme.rail), 0.14).getHex());
+    const B = gfx.budget;
+    const lite = B.material === 'lambert' && !detailed; // Low: per-vertex-cheap Lambert / Phong
     if (detailed) {
-      const leather = makeLeatherMaps(feltHex);
-      const woodA = makeWoodTexture(theme.key);
-      const woodB = makeWoodTexture(theme.key, true);
-      const woodTable = makeWoodTexture(`${theme.key}:table`);
+      const T = B.texture;
+      const leather = makeLeatherMaps(feltHex, T);
+      const woodA = makeWoodTexture(theme.key, false, T);
+      const woodB = makeWoodTexture(theme.key, true, T);
+      const woodTable = makeWoodTexture(`${theme.key}:table`, false, T);
       woodTable.repeat.set(19, 100);
       woodTable.center.set(0.5, 0.5);
       woodTable.rotation = Math.PI / 2;
-      pointTex = makeLeatherMaps('#b0b0b0');
+      pointTex = makeLeatherMaps('#b0b0b0', T);
       pointTex.map.repeat.set(0.45, 0.45);
       pointTex.bump.repeat.set(0.45, 0.45);
-      frameMat = new THREE.MeshPhysicalMaterial({ color: theme.frame, map: woodA, roughness: 0.42, metalness: 0, clearcoat: 0.35, clearcoatRoughness: 0.35, envMapIntensity: 0.3 });
+      frameMat = B.material === 'physical'
+        ? new THREE.MeshPhysicalMaterial({ color: theme.frame, map: woodA, roughness: 0.42, metalness: 0, clearcoat: 0.35, clearcoatRoughness: 0.35, envMapIntensity: 0.3 })
+        : new THREE.MeshStandardMaterial({ color: theme.frame, map: woodA, roughness: 0.42, metalness: 0, envMapIntensity: 0.3 });
       frameMatSide = frameMat.clone();
       frameMatSide.map = woodB;
-      feltMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: leather.map, bumpMap: leather.bump, bumpScale: 0.9, roughness: 0.85, metalness: 0, envMapIntensity: 0.2 });
+      feltMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: leather.map, bumpMap: B.bump ? leather.bump : null, bumpScale: 0.9, roughness: 0.85, metalness: 0, envMapIntensity: 0.2 });
+      if (!B.bump) leather.bump.dispose();
       railMat = new THREE.MeshStandardMaterial({ color: theme.rail, map: woodB, roughness: 0.5, envMapIntensity: 0.3 });
       tableMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(theme.rail).multiplyScalar(0.55), map: woodTable, roughness: 0.62, envMapIntensity: 0.2 });
+    } else if (lite) {
+      frameMat = frameMatSide = new THREE.MeshLambertMaterial({ color: theme.frame });
+      feltMat = new THREE.MeshLambertMaterial({ color: 0xffffff, map: makeLeatherTexture(feltHex) });
+      railMat = new THREE.MeshLambertMaterial({ color: theme.rail });
+      tableMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(theme.rail).multiplyScalar(0.5) });
     } else {
       frameMat = frameMatSide = new THREE.MeshStandardMaterial({ color: theme.frame, roughness: 0.55, metalness: 0.08 });
       feltMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: makeLeatherTexture(feltHex), roughness: 0.9, metalness: 0 });
       railMat = new THREE.MeshStandardMaterial({ color: theme.rail, roughness: 0.7 });
       tableMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(theme.rail).multiplyScalar(0.5), roughness: 0.8 });
     }
-    const brassMat = new THREE.MeshStandardMaterial({ color: theme.accent, roughness: detailed ? 0.34 : 0.3, metalness: 0.85, envMapIntensity: 0.5 });
+    const brassMat = lite
+      ? new THREE.MeshPhongMaterial({ color: theme.accent, specular: 0x8a7040, shininess: 60 })
+      : new THREE.MeshStandardMaterial({ color: theme.accent, roughness: detailed ? 0.34 : 0.3, metalness: 0.85, envMapIntensity: 0.5 });
 
     // Tabletop the travel board rests on: grounds the board and catches its shadow.
     const table = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), tableMat);
@@ -1260,7 +1294,7 @@ function createRenderer(canvas) {
     };
     const pointMat = (color) => new THREE.MeshStandardMaterial({
       color, roughness: 0.8, envMapIntensity: 0.2,
-      ...(pointTex ? { map: pointTex.map, bumpMap: pointTex.bump, bumpScale: 0.6 } : {}),
+      ...(pointTex ? { map: pointTex.map, bumpMap: B.bump ? pointTex.bump : null, bumpScale: 0.6 } : {}),
     });
     triMesh(triA, pointMat(theme.board));
     triMesh(triB, pointMat(theme.boardAlt));
@@ -1320,6 +1354,33 @@ function createRenderer(canvas) {
 
   const capRingGeo = new THREE.TorusGeometry(LAYOUT.markR * 0.62, 0.022, 8, 22);
 
+  // Low/Balanced marker variant: the brass cap ring merged into the marker geometry, with the
+  // player colour (body) and the theme accent (ring) as vertex colours. One draw per marker.
+  function mergeRing(body, playerColor, accent) {
+    const ring = capRingGeo.clone();
+    ring.rotateX(Math.PI / 2);
+    ring.translate(0, LAYOUT.markH / 2, 0);
+    const a = body.index ? body.toNonIndexed() : body.clone();
+    const b = ring.toNonIndexed();
+    ring.dispose();
+    const pc = new THREE.Color(playerColor), ac = new THREE.Color(accent);
+    const out = new THREE.BufferGeometry();
+    for (const name of ['position', 'normal', 'uv']) {
+      const x = a.getAttribute(name), y = b.getAttribute(name);
+      if (!x || !y) continue;
+      const arr = new Float32Array(x.array.length + y.array.length);
+      arr.set(x.array, 0); arr.set(y.array, x.array.length);
+      out.setAttribute(name, new THREE.BufferAttribute(arr, x.itemSize));
+    }
+    const na = a.getAttribute('position').count, nb = b.getAttribute('position').count;
+    const col = new Float32Array((na + nb) * 3);
+    for (let i = 0; i < na + nb; i++) col.set(i < na ? [pc.r, pc.g, pc.b] : [ac.r, ac.g, ac.b], i * 3);
+    out.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    a.dispose(); b.dispose();
+    out.computeBoundingSphere();
+    return out;
+  }
+
   function desiredMarkers(state) {
     const out = [];
     for (let i = 0; i < Rules.POINTS; i++) {
@@ -1350,15 +1411,18 @@ function createRenderer(canvas) {
     disposeChildren(markerGroup);
     markerMeshes.clear();
     for (const d of desiredMarkers(state)) {
-      const mesh = new THREE.Mesh(markerGeo, playerMats[d.player] || playerMats[0]);
+      const merged = mergedMarkerGeos[d.player] || mergedMarkerGeos[0];
+      const mesh = new THREE.Mesh(merged || markerGeo, playerMats[d.player] || playerMats[0]);
       mesh.position.set(d.pos.x, d.pos.y, d.pos.z);
       mesh.castShadow = true;
       mesh.layers.set(LAYER_GAME);
       mesh.receiveShadow = true;
-      const ring = new THREE.Mesh(capRingGeo, ringMat);
-      ring.rotation.x = Math.PI / 2;
-      ring.position.y = LAYOUT.markH / 2;
-      mesh.add(ring);
+      if (!merged) {
+        const ring = new THREE.Mesh(capRingGeo, ringMat);
+        ring.rotation.x = Math.PI / 2;
+        ring.position.y = LAYOUT.markH / 2;
+        mesh.add(ring);
+      }
       mesh.userData = { player: d.player, point: d.point, rail: d.rail, off: d.off };
       markerGroup.add(mesh);
       markerMeshes.set(d.key, mesh);
@@ -1369,7 +1433,7 @@ function createRenderer(canvas) {
     for (const child of [...group.children]) {
       // Marker body and ring materials are shared per theme; only per-object materials go.
       child.traverse((o) => {
-        if (o.material && o.geometry !== markerGeo && o.geometry !== capRingGeo && o.material !== ringMat) o.material.dispose?.();
+        if (o.material && o.geometry !== markerGeo && o.geometry !== capRingGeo && o.material !== ringMat && !playerMats.includes(o.material)) o.material.dispose?.();
       });
       group.remove(child);
     }
@@ -1383,7 +1447,8 @@ function createRenderer(canvas) {
     const movedFrom = new Map(); // 'point:x' or 'rail:p' -> count of animated movers
     if (!settings.reducedMotion) {
       for (const ev of events) {
-        if (ev.type === 'move' || ev.type === 'hit') {
+        // 'hit' events describe the struck victim (no from/to); its striker's 'move' carries the slide.
+        if (ev.type === 'move') {
           const k = ev.from === 'rail' ? `rail:${ev.player}` : `point:${ev.from}`;
           movedFrom.set(k, (movedFrom.get(k) || 0) + 1);
         }
@@ -1393,7 +1458,7 @@ function createRenderer(canvas) {
     // Slide moved markers from their origin toward their final slot.
     if (movedFrom.size) {
       for (const ev of events) {
-        if (ev.type !== 'move' && ev.type !== 'hit') continue;
+        if (ev.type !== 'move') continue;
         const toKey = ev.to === 'off'
           ? `o${ev.player}:${Math.max(0, state.off[ev.player] - 1)}`
           : `p${ev.to}:${Math.max(0, Math.min(state.points[ev.to].count, LAYOUT.maxStackShown) - 1)}`;
@@ -1577,21 +1642,25 @@ function createRenderer(canvas) {
     if (json === gfxSavedJson) return;
     gfxSavedJson = json;
     const prev = gfx;
-    gfx = Gfx.resolve(saved, detected);
+    gfx = Gfx.resolve(saved, detected, gpuLevel);
     // Shadows: enable/size the key light's map; lit materials recompile for the change.
     const size = Gfx.SHADOW_MAP[gfx.shadows];
     const shadowsChanged = renderer.shadowMap.enabled !== size > 0;
     renderer.shadowMap.enabled = size > 0;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    const shadowType = gfx.budget.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    const typeChanged = renderer.shadowMap.type !== shadowType;
+    renderer.shadowMap.type = shadowType;
     keyLight.castShadow = size > 0;
     if (size > 0 && keyLight.shadow.mapSize.x !== size) {
       keyLight.shadow.mapSize.set(size, size);
       keyLight.shadow.map?.dispose();
       keyLight.shadow.map = null;
     }
-    if (shadowsChanged) scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.needsUpdate = true; }); });
+    if (shadowsChanged || typeChanged) scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.needsUpdate = true; }); });
     // Board detail swaps textures, geometry and materials.
-    if (prev.detail !== gfx.detail) setTheme(theme.key);
+    const bKey = (r) => [r.detail, r.budget.material, r.budget.segments, r.budget.texture, r.budget.bump, r.budget.mergedRing].join('|');
+    if (bKey(prev) !== bKey(gfx)) setTheme(theme.key);
+    if (motes && motes.n !== gfx.budget.motes) { fxGroup.remove(motes.points); motes.geo.dispose(); motes.points.material.dispose(); buildMotes(); }
     // The lantern pool is part of the detailed look; Low skips the extra light entirely.
     lantern.visible = gfx.detail === 'detailed';
     applyReflections();
@@ -1632,7 +1701,7 @@ function createRenderer(canvas) {
   function graphicsInfo() {
     const w = canvas.clientWidth || innerWidth, h = canvas.clientHeight || innerHeight;
     return {
-      gpu, detected, resolved: gfx,
+      gpu, level: gpuLevel, detected, resolved: gfx,
       pixels: [Math.round(w * pixelRatio), Math.round(h * pixelRatio)],
       fps: Math.round(fps), adaptiveScale: Math.round(adaptiveScale * 100) / 100,
       postFailed,
@@ -1684,7 +1753,7 @@ function createRenderer(canvas) {
 
   // Dust motes drifting through the lantern light (background: animated).
   function buildMotes() {
-    const N = 40;
+    const N = gfx.budget.motes;
     const geo = new THREE.BufferGeometry();
     const arr = new Float32Array(N * 3);
     const rng = Rules.createRng(Rules.hashSeed('motes'));
@@ -1702,7 +1771,7 @@ function createRenderer(canvas) {
     points.raycast = () => {};
     points.visible = false;
     fxGroup.add(points);
-    motes = { points, seeds, arr, geo };
+    motes = { points, seeds, arr, geo, n: N };
     updateMotes(0);
   }
 
@@ -1742,11 +1811,12 @@ function createRenderer(canvas) {
   function burst(x, y, z, color, n) {
     if (settings.reducedMotion || !particles) return;
     if (gfx.particles === 'low') n = Math.ceil(n / 2);
+    n = Math.max(1, Math.min(gfx.budget.particles, Math.round(n * gfx.budget.burst)));
     const c = new THREE.Color(color);
     const rng = Rules.createRng(Rules.hashSeed(`fx:${x}:${z}:${performance.now() | 0}`));
     for (let i = 0; i < n; i++) {
       const p = particles.data[particles.cursor];
-      particles.cursor = (particles.cursor + 1) % MAX_PARTICLES;
+      particles.cursor = (particles.cursor + 1) % Math.min(MAX_PARTICLES, gfx.budget.particles);
       const a = rng.next() * Math.PI * 2;
       const sp = 1.2 + rng.next() * 2.2;
       p.life = 0.55 + rng.next() * 0.4;
@@ -2879,7 +2949,7 @@ let gfxSummaryTimer = 0;
 function graphicsSummary() {
   const info = rendererApi?.graphicsInfo();
   if (!info) return '';
-  return `${info.gpu || GFX_L.unknownGpu} · ${Gfx.describe(info.resolved, info.pixels, GFX_L.words)}`;
+  return `${info.gpu || GFX_L.unknownGpu} · ${GFX_L.level.replace('{level}', info.level)} · ${Gfx.describe(info.resolved, info.pixels, GFX_L.words)}`;
 }
 
 // Builds (or rebuilds, after a preset change clears overrides) the Graphics controls.

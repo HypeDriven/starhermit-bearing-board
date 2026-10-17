@@ -1,19 +1,40 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import '../gpu-level.js'; // sets globalThis.StarHermitGpu (ES-module package)
 import * as Gfx from '../js/gfx.js';
 import { GFX_STRINGS, LOCALES, pickLocale } from '../js/gfx-strings.js';
 
-test('detectPreset maps GPU strings to presets', () => {
+test('hardware level picks the Auto preset (StarHermit gpu-level.js)', () => {
   assert.equal(Gfx.detectPreset('ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)'), 'low');
   assert.equal(Gfx.detectPreset('llvmpipe (LLVM 15.0.7, 256 bits)'), 'low');
+  assert.equal(Gfx.detectPreset('ANGLE (AMD, AMD Radeon(TM) Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)'), 'low');
+  assert.equal(Gfx.detectPreset('ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11)'), 'low');
+  assert.equal(Gfx.detectPreset('ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11)'), 'balanced');
   assert.equal(Gfx.detectPreset('ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0)'), 'high');
-  assert.equal(Gfx.detectPreset('Apple M2'), 'high');
-  assert.equal(Gfx.detectPreset('ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11)'), 'balanced');
-  assert.equal(Gfx.detectPreset('Mali-G78'), 'balanced');
-  assert.equal(Gfx.detectPreset(''), 'balanced');
-  // Touch / small-screen devices cap Auto at balanced, but never raise it.
-  assert.equal(Gfx.detectPreset('Apple M2', { mobile: true }), 'balanced');
+  assert.equal(Gfx.detectPreset('ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 Direct3D11 vs_5_0 ps_5_0)'), 'ultra');
+  assert.equal(Gfx.detectPreset('ANGLE (NVIDIA, NVIDIA GeForce RTX 5090 Direct3D11 vs_5_0 ps_5_0)'), 'ultra');
+  assert.equal(Gfx.detectLevel('NVIDIA GeForce RTX 5090'), 20);
+  assert.equal(Gfx.detectPreset('Adreno (TM) 740', { mobile: true }), 'balanced');
+  assert.equal(Gfx.detectPreset('NVIDIA GeForce RTX 5090', { mobile: true }), 'balanced');
   assert.equal(Gfx.detectPreset('SwiftShader', { mobile: true }), 'low');
+  for (const [p, lv] of Object.entries(Gfx.LEVELS)) assert.equal(Gfx.presetForLevel(lv), p);
+  assert.equal(Gfx.presetForLevel(9), 'balanced');
+  assert.equal(Gfx.presetForLevel(16), 'high');
+});
+
+test('per-preset budgets are explicit, grow from Low to Ultra and scale with the level', () => {
+  const keys = ['material', 'segments', 'texture', 'particles', 'motes', 'bloomRes'];
+  for (const p of Gfx.PRESETS) for (const k of keys) assert.ok(k in Gfx.BUDGETS[p], `${p}.${k}`);
+  for (let i = 1; i < Gfx.PRESETS.length; i++) {
+    const a = Gfx.BUDGETS[Gfx.PRESETS[i - 1]], b = Gfx.BUDGETS[Gfx.PRESETS[i]];
+    for (const k of keys.slice(1)) assert.ok(b[k] >= a[k], `${Gfx.PRESETS[i]}.${k}`);
+  }
+  assert.equal(Gfx.BUDGETS.low.material, 'lambert');
+  assert.equal(Gfx.BUDGETS.ultra.material, 'physical');
+  assert.equal(Gfx.budget('high', 10).burst, 1);
+  assert.ok(Gfx.budget('high', 14).burst > 1 && Gfx.budget('high', 20).burst <= 2);
+  assert.ok(Gfx.budget('ultra', 2).burst < 1);
+  assert.equal(Gfx.resolve({ preset: 'low' }, 'low', 0).budget.material, 'lambert');
 });
 
 test('resolve: auto uses the detected preset, explicit presets win', () => {

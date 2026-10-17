@@ -72,7 +72,8 @@ export function buildComposer(renderer, scene, camera, g, w, h, ratio, aoExclude
   }
   if (g.bloom === 'on') {
     // High threshold: only brass glints, selection rings and sparks bloom.
-    composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.3, 0.35, 0.9));
+    const br = (g.budget && g.budget.bloomRes) || 1; // bloom at the preset budget's resolution
+    composer.addPass(new UnrealBloomPass(new THREE.Vector2(Math.round(w * ratio * br), Math.round(h * ratio * br)), 0.3, 0.35, 0.9));
   }
   composer.addPass(new OutputPass());
   if (g.grade === 'on') composer.addPass(new ShaderPass(GradeShader));
