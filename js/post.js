@@ -13,6 +13,15 @@ import { Pass } from 'three/addons/postprocessing/Pass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
+// EffectComposer resizes every pass to the full frame (addPass / setSize); this keeps a pass at a
+// fraction of it (used for the preset budget's bloom resolution).
+function atScale(pass, k) {
+  const setSize = pass.setSize.bind(pass);
+  pass.setSize = (w, h) => setSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+  return pass;
+}
+
+
 // Colour grade + vignette, applied after OutputPass (display-space in, display-space out).
 // Warm lantern highlights, slightly cooler shadows, gentle S-curve; never crushes the pieces.
 const GradeShader = {
@@ -73,7 +82,7 @@ export function buildComposer(renderer, scene, camera, g, w, h, ratio, aoExclude
   if (g.bloom === 'on') {
     // High threshold: only brass glints, selection rings and sparks bloom.
     const br = (g.budget && g.budget.bloomRes) || 1; // bloom at the preset budget's resolution
-    composer.addPass(new UnrealBloomPass(new THREE.Vector2(Math.round(w * ratio * br), Math.round(h * ratio * br)), 0.3, 0.35, 0.9));
+    composer.addPass(atScale(new UnrealBloomPass(new THREE.Vector2(Math.round(w * ratio * br), Math.round(h * ratio * br)), 0.3, 0.35, 0.9), br));
   }
   composer.addPass(new OutputPass());
   if (g.grade === 'on') composer.addPass(new ShaderPass(GradeShader));

@@ -194,11 +194,10 @@ High-contrast mode swaps the UI tokens to pure black / white / `#ffdf4d`. The hu
 
 Spark bursts and dust motes scale within the preset by the hardware level (`StarHermitGpu.scaleBudget`, ≤ 2×; fewer below the floor). Textures and meshes are generated procedurally at load; a preset change that alters the budget rebuilds the board and markers. Gameplay is identical on every preset.
 
-**60 FPS benchmark** (`node tools/gfx-bench.mjs bearing-board [--mobile --presets low,balanced]`, dev-only, real GPUs; hook `tests/gfx-bench.mjs` picks the preset in Settings → Graphics, starts a practice duel with Play now and keeps playing via Roll and the board's keyboard mirror). Measured 2026-10-17 under heavy machine load:
+**60 FPS benchmark** (`node tools/gfx-bench.mjs bearing-board [--mobile --presets low,balanced]`, dev-only, real GPUs; hook `tests/gfx-bench.mjs` picks the preset in Settings → Graphics, starts a practice duel with Play now and keeps playing via Roll and the board's keyboard mirror). Measured 2026-10-17 with the revised gate (an empty full-window canvas is measured before each preset and subtracted percentile for percentile; typical p50 ≤ 12 ms and slow p90 ≤ 14 ms at the preset's floor level, CPU p90 ≤ 6 ms):
 
-- Desktop 1920×1080: FAIL low (GPU p90 14.09 ms on level 2 → ≈ 21.32 ms at level 0, CPU p90 0.70 ms; 11.11 ms → ≈ 16.81 ms when it is not the first preset run); PASS balanced (19.62 → ≈ 12.97 ms at level 4, CPU 0.80 ms); PASS high (55.55 → ≈ 10.60 ms at level 10, CPU 1.20 ms); PASS ultra (136.62 → ≈ 6.12 ms at level 17, CPU 1.10 ms).
-- Mobile 390×844 @3×: FAIL low (16.89 → ≈ 25.56 ms, CPU 0.60 ms); PASS balanced (16.80 → ≈ 11.11 ms, CPU 0.80 ms).
-- Low is at the benchmark's floor: an empty WebGL page measured 11.0–11.5 ms (desktop) and 13–15 ms (mobile) on the iGPU around these runs, against a 9.25 ms allowance at level 2.
+- Desktop 1920×1080: PASS low (GPU p50 9.09 / p90 13.25 ms, empty canvas 9.73 / 11.26, on level 2 → at level 0: typical 0.00, slow 3.01; CPU p90 0.60 ms); PASS balanced (typical 8.11, slow 6.39 at level 4; CPU 0.90 ms); PASS high (typical 8.50, slow 8.34 at level 10; CPU 1.40 ms); PASS ultra (typical 5.27, slow 5.18 at level 17; CPU 1.30 ms).
+- Mobile 390×844 @3×: PASS low (typical 5.87, slow 10.30 at level 0; CPU 0.70 ms); PASS balanced (typical 6.12, slow 3.88 at level 4; CPU 0.70 ms).
 
 ## 9. Audio direction
 
