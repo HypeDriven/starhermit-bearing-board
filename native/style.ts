@@ -41,6 +41,6 @@ export function setStyle(): void {
     scrollArea: { parts: { bar: { background: "$line", radius: 4 } } },
     // The title key art and the results illustrations (the browser's <img> with radius and border).
     ...Object.fromEntries([["art-key", "assets/key-art.webp"], ["art-victory", "assets/results-victory.webp"], ["art-road", "assets/results-road.webp"]]
-      .map(([k, image]) => [`.${k}`, { extends: [".art"], background: { image: image!, size: "cover" } } as ui.Style])),
+      .map(([k, image]) => [`.${k}`, { extends: [".art"], background: [{ image: image!, size: "cover" }, "#1a1d33"] } as ui.Style])),
   });
 }

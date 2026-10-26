@@ -30,7 +30,7 @@
     "native/quality.ts": {"sha256": "5510b38bd34d22de2cf5b8f1053e1e82638db6d8cde178fe8a34bd163cbd8ba7", "size": 4029},
     "native/render.ts": {"sha256": "e51e696550c13758d2ea51dbe3bfb34bb73a1bdaef54d9755ee4f7af05eae846", "size": 48191},
     "native/screens.ts": {"sha256": "28f0dc3e7c782bbda3f4f93614db85f124875e4e76acd9102e73bc4c8ccb0406", "size": 38475},
-    "native/style.ts": {"sha256": "8529323ce47ff4910de735b51baccd42f8fb112cd73ffd13034572499d1d1904", "size": 2832},
+    "native/style.ts": {"sha256": "a647fc3cd82d7b20c6b1e6b86fbb95ed5db267f734d43a0f63f49f3c9d164597", "size": 2845},
     "score-script.js": {"sha256": "f45dd1c0f7908527f1b682b68b3a0c3b2ed5c85b27f6a9df301344e6f13d3db7", "size": 2486},
     "sfx/bear-off.opus": {"sha256": "e52d4b5ee8c4c11a926df9ad4796f80299ea1cfa2c1815050b7018f2a18085b2", "size": 14306},
     "sfx/checker-hit.opus": {"sha256": "6e51a6e1be490af11cfc9b7033935ebbebe9487adef7006212850673348b8368", "size": 13523},
