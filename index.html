@@ -1,100 +1,18 @@
-<!DOCTYPE html>
+<!doctype html>
+<!-- StarHermit web loader, written by starhermit package --web: it pins the engine by hash and holds no script of its own; package again rather than edit it. -->
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<meta name="theme-color" content="#0e1020" />
-<meta name="description" content="Bearing Board — a travel-board dice race of wood, leather, and brass. Roll, hit exposed markers, and bear everything off first." />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="icon.png">
 <title>Bearing Board</title>
-<link rel="icon" type="image/png" href="favicon.png" />
-<link rel="icon" type="image/png" href="icon.png" />
-<script src="game-options.js" data-game="bearing-board"></script>
-<script src="ui-scale.js"></script>
-<link rel="stylesheet" href="css/main.css" />
-<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }</script>
-<script src="browser-guard.js"></script>
-<script src="starhermit-sdk.js"></script>
-<script src="sh-language.js"></script>
-<script src="gpu-level.js"></script>
+<style>html,body{margin:0;height:100%;background:#000;color:#eee;font:16px/1.5 system-ui,sans-serif}canvas{display:block;width:100%;height:100%}.starhermit-message{position:fixed;inset:0;margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;background:#000}.starhermit-message[hidden]{display:none}.starhermit-late{animation:starhermit-late 0s 20s both}@keyframes starhermit-late{from{visibility:hidden}to{visibility:visible}}</style>
+<script type="module" src="https://wiki.starhermit.com/engine/1.14.0/starhermit.js" integrity="sha384-ufZSKVCnP6ckrTu/xe8NRHweVCP7JO2+cYDR994qVqGkfBjzCXsraB1+1YGpxIfy" crossorigin="anonymous"></script>
+<script type="application/json" id="starhermit-config">{"manifest":{"integrity":"sha384-Mw6WVzO4yDvwyZd15YtZ7uB1g4iVFTWxIOav914pkLeagvowb2bVYXNS+MtL6NeS","url":"https://wiki.starhermit.com/engine/1.14.0/manifest.json"}}</script>
 </head>
 <body>
-<div id="bb-root">
-  <canvas id="bb-canvas" aria-hidden="true"></canvas>
-  <div id="bb-webgl-fallback" class="bb-fallback" hidden>
-    <h1>Bearing Board</h1>
-    <p data-i18n="fallback.body">This game needs WebGL to draw the board, and your browser could not provide it. Your progress and settings are safe; try a recent desktop or mobile browser.</p>
-  </div>
-
-  <div id="bb-ui">
-    <!-- HUD -->
-    <header id="bb-hud-top" class="bb-hud" hidden>
-      <div id="bb-objective" class="bb-objective" role="status"></div>
-      <div id="bb-turn-indicator" class="bb-turn" role="status"></div>
-      <div id="bb-dice-tray" class="bb-dice-tray" role="group" aria-label="Dice" data-i18n-aria="hud.dice"></div>
-      <button id="bb-btn-pause" class="bb-btn bb-btn-icon" type="button" aria-label="Pause game" data-i18n-aria="hud.pause">II</button>
-    </header>
-
-    <aside id="bb-rail-left" class="bb-rail bb-rail-left" hidden aria-label="Objective and progress" data-i18n-aria="rail.objectiveAria">
-      <h2 class="bb-rail-title" data-i18n="rail.objective">Objective</h2>
-      <div id="bb-rail-objective"></div>
-      <h2 class="bb-rail-title" data-i18n="rail.progress">Progress</h2>
-      <div id="bb-rail-progress"></div>
-    </aside>
-
-    <aside id="bb-rail-right" class="bb-rail bb-rail-right" hidden aria-label="Status and actions" data-i18n-aria="rail.statusAria">
-      <h2 class="bb-rail-title" data-i18n="rail.table">Table</h2>
-      <div id="bb-rail-status"></div>
-      <div id="bb-rail-players"></div>
-    </aside>
-
-    <div id="bb-action-tray" class="bb-tray" hidden role="toolbar" aria-label="Actions" data-i18n-aria="tray.aria">
-      <button id="bb-btn-roll" class="bb-btn bb-btn-primary" type="button" data-i18n="btn.roll">Roll</button>
-      <button id="bb-btn-double" class="bb-btn" type="button" data-i18n="btn.double">Offer Stakes</button>
-      <button id="bb-btn-pass" class="bb-btn" type="button" data-i18n="btn.pass">Pass</button>
-      <button id="bb-btn-undo" class="bb-btn" type="button" data-i18n="btn.undo">Undo</button>
-      <button id="bb-btn-hint" class="bb-btn" type="button" data-i18n="btn.hint">Hint</button>
-      <button id="bb-btn-skip" class="bb-btn" type="button" data-i18n="btn.skip">Skip Anim</button>
-    </div>
-
-    <div id="bb-tutorial-card" class="bb-tutorial" hidden role="note">
-      <p id="bb-tutorial-text"></p>
-      <button id="bb-btn-lesson-done" class="bb-btn" type="button" data-i18n="btn.finishLesson">Finish lesson</button>
-    </div>
-
-    <div id="bb-cube-overlay" class="bb-modal" hidden role="dialog" aria-modal="true" aria-labelledby="bb-cube-title">
-      <div class="bb-card">
-        <h2 id="bb-cube-title" data-i18n="cube.title">Stakes offered</h2>
-        <p id="bb-cube-text"></p>
-        <div class="bb-row">
-          <button id="bb-btn-accept" class="bb-btn bb-btn-primary" type="button" data-i18n="btn.accept">Accept</button>
-          <button id="bb-btn-decline" class="bb-btn bb-btn-danger" type="button" data-i18n="btn.decline">Decline</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="bb-pause-overlay" class="bb-modal" hidden role="dialog" aria-modal="true" aria-labelledby="bb-pause-title">
-      <div class="bb-card">
-        <h2 id="bb-pause-title" data-i18n="pause.title">Paused</h2>
-        <div class="bb-col">
-          <button id="bb-btn-resume" class="bb-btn bb-btn-primary" type="button" data-i18n="btn.resume">Resume</button>
-          <button id="bb-btn-restart" class="bb-btn" type="button" data-i18n="btn.restart">Restart table</button>
-          <button id="bb-btn-pause-settings" class="bb-btn" type="button" data-i18n="btn.settings">Settings</button>
-          <button id="bb-btn-pause-help" class="bb-btn" type="button" data-i18n="btn.help">Help</button>
-          <button id="bb-btn-leave" class="bb-btn bb-btn-danger" type="button" data-i18n="btn.leave">Leave table</button>
-        </div>
-      </div>
-    </div>
-
-    <main id="bb-screen" class="bb-screen" tabindex="-1"></main>
-
-    <!-- Screen-reader board mirror: a concise navigable model of the 3D board -->
-    <div id="bb-board-mirror" class="bb-sr-only" aria-label="Board state" data-i18n-aria="mirror.aria"></div>
-    <div id="bb-live" class="bb-sr-only" aria-live="polite" role="status"></div>
-    <div id="bb-live-assertive" class="bb-sr-only" aria-live="assertive" role="alert"></div>
-    <div id="bb-toast" class="bb-toast" hidden></div>
-    <div id="bb-fps" class="bb-fps" aria-hidden="true" hidden></div>
-  </div>
-</div>
-<script type="module" src="js/main.js"></script>
+<canvas></canvas>
+<div id="starhermit-status" class="starhermit-message" role="status"><span>Loading Bearing Board…</span><span class="starhermit-late">If the game has not started, this browser cannot run it or its engine (StarHermit 1.14.0) could not be loaded: reload the page, or open it in a current Chrome, Edge, Firefox or Safari.</span></div>
+<noscript><p class="starhermit-message">This game needs JavaScript.</p></noscript>
 </body>
 </html>

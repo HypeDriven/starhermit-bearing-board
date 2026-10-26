@@ -34,7 +34,7 @@ test('GET /api/v1/time returns platform time', async () => {
 });
 
 test('static hosting serves the launch file and assets', async () => {
-  for (const p of ['/', '/index.html', '/js/main.js', '/js/rules.js', '/css/main.css', '/starhermit.txt', '/vendor/three.module.min.js']) {
+  for (const p of ['/', '/index.html', '/starhermit-files.json', '/native/main.ts', '/js/rules.js', '/starhermit.txt', '/assets/ui-style.json']) {
     const res = await fetch(`${base}${p}`);
     assert.equal(res.status, 200, p);
   }

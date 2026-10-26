@@ -1,18 +1,18 @@
 {
   "name": "bearing-board",
   "version": "1.0.0",
-  "description": "Bearing Board — a travel-board dice race of wood, leather, and brass. Roll, hit exposed markers, and bear everything off first.",
+  "description": "Bearing Board — a travel-board dice race of wood, leather, and brass on the StarHermit engine",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "test": "node --test tests/*.test.mjs",
-    "smoke": "node tests/smoke.mjs",
-    "test:e2e": "node tests/e2e.mjs"
+    "test": "node --test tests/*.test.mjs && node tests/native.mjs",
+    "test:rules": "node --test tests/*.test.mjs",
+    "test:native": "node tests/native.mjs",
+    "test:browser": "node ../tools/engine-web-smoke.mjs . --shots test-results/web",
+    "plays": "node tools/gen-play.mjs",
+    "package": "node tools/package-web.mjs",
+    "css": "$STARHERMIT css tools/ui-style.css --out assets/ui-style.json --font-size 16 --path tools/ui-style.css",
+    "start": "node server.js"
   },
-  "engines": {
-    "node": ">=18"
-  },
-  "devDependencies": {
-    "playwright-core": "^1.62.1"
-  }
+  "engines": { "node": ">=18" },
+  "devDependencies": { "playwright-core": "^1.62.1" }
 }

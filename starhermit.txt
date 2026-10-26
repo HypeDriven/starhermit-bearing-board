@@ -1,15 +1,43 @@
 name=Bearing Board
 description=Roll dice, capture rival markers, and race to bear all your pieces off a classic backgammon-style board.
-launch=index.html
 owner=2712e04e-461b-4d23-81ae-e40b429128a8
 server=score-script.js
 version=1.0.0
 contentVersion=1
 cover=cover.jpg
+
+# StarHermit engine script game: one package, played natively by the
+# StarHermit client and in browsers by the engine's web runtime. Browsers open
+# launch=index.html, the loader `npm run package` writes (it pins the engine
+# on wiki.starhermit.com; never edit it). Re-run `npm run package` after every
+# change and commit index.html + starhermit-files.json.
+launch=index.html
+engine.api=1
+engine.entry=native/main.ts
+engine.version=1.14.0
+engine.minor=16
+engine.capabilities=platform,storage,clipboard
+
+# Keyboard controls (players rebind keys and pads in the runtime's Options).
 control.roll=KeyR | Roll dice
 control.undo=KeyU | Undo move
 control.hint=KeyH | Hint
 control.pause=Escape | Pause
-control.cameraReset=KeyC | Reset camera
+control.camera=KeyC | Reset camera
 control.prev=ArrowLeft+ArrowUp | Previous point
 control.next=ArrowRight+ArrowDown | Next point
+control.confirm=Enter | Select or move to the point
+control.cancel=Backspace | Clear selection
+engine.group.roll=Table
+engine.group.prev=Board
+
+# Gamepad defaults for the same actions.
+engine.gamepad.roll=North
+engine.gamepad.undo=West
+engine.gamepad.hint=LeftShoulder
+engine.gamepad.pause=Start
+engine.gamepad.camera=RightShoulder
+engine.gamepad.prev=DpadLeft+DpadUp
+engine.gamepad.next=DpadRight+DpadDown
+engine.gamepad.confirm=South
+engine.gamepad.cancel=East
