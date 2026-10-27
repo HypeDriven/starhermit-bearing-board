@@ -11,7 +11,7 @@
 | Genre | Turn-based race board game (original rules family, two rulesets) |
 | Players | 1 human vs 1–3 deterministic AI rivals; 2-human pass-and-play on one device (practice only) |
 | Session length | Practice duel 10–20 min; lessons 1–3 min; endgame stages 3–6 min; four-caravan circuits up to 25 min |
-| Platforms | StarHermit engine 1.15.0 script game (host API 1.17): natively in the StarHermit client and in desktop and mobile browsers through the engine's web runtime; portrait and landscape |
+| Platforms | StarHermit engine 1.15.2 script game (host API 1.17): natively in the StarHermit client and in desktop and mobile browsers through the engine's web runtime; portrait and landscape |
 | Rendering | `starhermit:scene` (three.js-like) perspective scene, all geometry procedural, the engine's post effects; the HUD and screens in `starhermit:ui` over it |
 | Offline | Fully playable without any server; a guest makes no platform call. The daily's UTC day is the device's clock |
 
@@ -19,7 +19,7 @@ File map (everything that ships or is run):
 
 | Path | Responsibility |
 |---|---|
-| `starhermit.txt` | Manifest: name, description, owner, `server=score-script.js`, cover, `launch=index.html`, `engine.*` (api 1, entry `native/main.ts`, version 1.15.0, minor 16, capabilities platform, storage, clipboard), `control.*` keys and `engine.gamepad.*` pads |
+| `starhermit.txt` | Manifest: name, description, owner, `server=score-script.js`, cover, `launch=index.html`, `engine.*` (api 1, entry `native/main.ts`, version 1.15.2, minor 16, capabilities platform, storage, clipboard), `control.*` keys and `engine.gamepad.*` pads |
 | `index.html`, `starhermit-files.json` | The engine's web loader and file index, written by `npm run package` (`starhermit package --web .`); never edited |
 | `native/main.ts` | Entry module: session controller (`Session`), goals, stars, achievements, app phases, commands, selection, the board cursor, pause / leave / restart, results, input (actions, pointer, touch) |
 | `native/screens.ts` | HUD, rails, tray, lesson card, stakes and pause dialogs, toasts and the full-window screens in `starhermit:ui`; layouts by window size; frames the board in what the HUD leaves |
