@@ -8,21 +8,25 @@
 //
 // What changed from three.js, and why:
 // - LatheGeometry is lathe() below; Phong brass on Low is a standard material.
-// - The bump maps are normal maps made from the same seeded height canvas.
 // - The EffectComposer chain (GTAO, UnrealBloom, the grade ShaderPass,
 //   SMAA / FXAA / MSAA) is renderer.ao / bloom / grade / antialias; the
 //   grade is the built-in display-space grade with the same curve, tints and
 //   vignette. Particles and selection decals stay out of AO (noAO).
-// - Light intensities are three.js r160's divided by π (the engine's convention).
+// - Lights, shadows (the fitted shadow.camera box, bias, normalBias, radius,
+//   PCF / PCF-soft), RoomEnvironment(renderer) reflections, bump maps and the
+//   canvas textures' colour spaces are the page's own (engine minor 23+
+//   follows three r155+, minor 28 follows texture.colorSpace). r160 scaled
+//   scene.environment by each material's envMapIntensity, so each standard
+//   material takes the room as its own envMap (applyEnvMaps).
 // - Layers do not exist: picking tests the browser build's hit volumes as
 //   boxes along the pointer's ray instead of raycasting invisible meshes.
 import {
   ACESFilmicToneMapping, AdditiveBlending, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture,
-  CircleGeometry, Color, CylinderGeometry, DataTexture, DirectionalLight, Fog, Group,
+  Box3, CircleGeometry, Color, CylinderGeometry, DirectionalLight, Fog, Group,
   HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshLambertMaterial,
-  MeshPhysicalMaterial, MeshStandardMaterial, NormalBlending, PMREMGenerator, PerspectiveCamera, RoomEnvironment,
+  MeshPhysicalMaterial, MeshStandardMaterial, NormalBlending, OrthographicCamera, PCFShadowMap, PCFSoftShadowMap, PMREMGenerator, PerspectiveCamera, RoomEnvironment,
   PlaneGeometry, PointLight, Points, PointsMaterial, Quaternion, Raycaster, RepeatWrapping,
-  RingGeometry, TorusGeometry, Vector2, Vector3, pointerToNdc, renderer, scene,
+  RingGeometry, SRGBColorSpace, TorusGeometry, Vector3, pointerToNdc, renderer, scene,
 } from "starhermit:scene";
 import type { Material, Texture } from "starhermit:scene";
 import { OffscreenCanvas } from "starhermit:canvas";
@@ -42,7 +46,7 @@ export interface Frame { x0: number; y0: number; x1: number; y1: number }
 export const LAYOUT = { cols: 12, colGap: 0.82, barGap: 0.55, rowZ: 2.35, markR: 0.3, markH: 0.16, stackStep: 0.42, maxStackShown: 5 };
 const FRAMING = { tiltDeg: 54, halfW: 7.1, halfH: 3.55, lookX: 0.35, lookZ: 0.1, fov: 42 };
 const PI = Math.PI;
-const LANTERN = 6 / PI;
+const LANTERN = 6;
 
 function pointCol(point: number): number { return point < 12 ? 11 - point : point - 12; }
 function pointX(col: number): number {
@@ -77,15 +81,38 @@ let reducedMotion = false;
 let lastState: State | null = null;
 const hex = (c: number | string): Color => new Color(c);
 
-const keyLight = new DirectionalLight(0xfff1d6, 1.8 / PI);
+const keyLight = new DirectionalLight(0xfff1d6, 1.8);
 keyLight.position.set(4, 9, 5);
 keyLight.shadow.bias = -0.0004;
-const hemiLight = new HemisphereLight(0x8fa3c8, 0x2a1c12, 0.55 / PI);
-const rim = new DirectionalLight(0xc8d4f0, 0.5 / PI);
+keyLight.shadow.normalBias = 0.02;
+keyLight.shadow.radius = 3;
+fitShadowFrustum();
+const hemiLight = new HemisphereLight(0x8fa3c8, 0x2a1c12, 0.55);
+const rim = new DirectionalLight(0xc8d4f0, 0.5);
 rim.position.set(-5, 6, -4);
 // Lantern off the far-left corner (as in the key art): warm pool of light on the leather.
 const lantern = new PointLight(0xffb45e, LANTERN, 16, 2);
 lantern.position.set(-6.2, 3.2, -3.6);
+
+/** The key light's orthographic shadow camera fitted tightly around the play area (board,
+ * frame, trays and the tallest stacks), measured in light space (the page's fitShadowFrustum). */
+function fitShadowFrustum(): void {
+  const cam = keyLight.shadow.camera as OrthographicCamera;
+  keyLight.target.position.set(0, 0, 0);
+  keyLight.updateMatrixWorld();
+  keyLight.target.updateMatrixWorld();
+  const view = new Matrix4().lookAt(keyLight.position, keyLight.target.position, new Vector3(0, 1, 0));
+  view.setPosition(keyLight.position);
+  const inv = view.clone().invert();
+  const box = new Box3();
+  for (const x of [-7.6, 7.6]) for (const y of [-0.45, 1.3]) for (const z of [-4.1, 4.1]) {
+    box.expandByPoint(new Vector3(x, y, z).applyMatrix4(inv));
+  }
+  const pad = 0.3;
+  cam.left = box.min.x - pad; cam.right = box.max.x + pad; cam.bottom = box.min.y - pad; cam.top = box.max.y + pad;
+  cam.near = Math.max(0.1, -box.max.z - 2); cam.far = -box.min.z + 2;
+  cam.updateProjectionMatrix();
+}
 
 const boardGroup = new Group();
 const markerGroup = new Group();
@@ -125,41 +152,16 @@ function makeLeatherTexture(base: string): Texture {
   const tex = new CanvasTexture(c);
   tex.wrapS = tex.wrapT = RepeatWrapping;
   tex.repeat.set(3, 2);
+  tex.colorSpace = SRGBColorSpace;
   textureCache.set(key, tex);
   return tex;
 }
 
-/** A height canvas (grey, linear) as a tangent-space normal map. */
-function heightToNormals(src: OffscreenCanvas, strength: number): DataTexture {
-  const N = src.width;
-  const d = src.getContext("2d").getImageData(0, 0, N, N).data;
-  const h = new Float32Array(N * N);
-  for (let i = 0; i < N * N; i++) h[i] = d[i * 4]! / 255;
-  const px = new Uint8Array(N * N * 4);
-  for (let y = 0; y < N; y++) {
-    for (let x = 0; x < N; x++) {
-      const at = (xx: number, yy: number): number => h[((yy + N) % N) * N + ((xx + N) % N)]!;
-      const dx = (at(x + 1, y) - at(x - 1, y)) * strength;
-      const dy = (at(x, y + 1) - at(x, y - 1)) * strength;
-      const l = Math.hypot(dx, dy, 1);
-      const o = (y * N + x) * 4;
-      px[o] = Math.round((-dx / l * 0.5 + 0.5) * 255);
-      px[o + 1] = Math.round((dy / l * 0.5 + 0.5) * 255);
-      px[o + 2] = Math.round((1 / l * 0.5 + 0.5) * 255);
-      px[o + 3] = 255;
-    }
-  }
-  const tex = new DataTexture(px, N, N);
-  tex.wrapS = tex.wrapT = RepeatWrapping;
-  tex.generateMipmaps = true;
-  return tex;
-}
-
 /** Detailed tier: seeded leather (mottling, pores, creases) as a colour map
- * plus its relief as a normal map (with `bump`). */
-function makeLeatherMaps(base: string, size: number, bump: boolean): { map: Texture; normal: DataTexture | null } {
+ * plus its relief as a bump map (with `bump`). */
+function makeLeatherMaps(base: string, size: number, bump: boolean): { map: Texture; bump: Texture | null } {
   const key = `leather:${base}:${size}:${bump}`;
-  const hit = textureCache.get(key) as { map: Texture; normal: DataTexture | null } | undefined;
+  const hit = textureCache.get(key) as { map: Texture; bump: Texture | null } | undefined;
   if (hit) return hit;
   const N = size, k = N / 512; // authored at 512 px; pores stay 1–2 px, so larger maps are finer
   const S = 512;
@@ -240,8 +242,14 @@ function makeLeatherMaps(base: string, size: number, bump: boolean): { map: Text
   const map = new CanvasTexture(c);
   map.wrapS = map.wrapT = RepeatWrapping;
   map.anisotropy = 4;
-  const normal = b ? heightToNormals(b, 3.5) : null;
-  const out = { map, normal };
+  map.colorSpace = SRGBColorSpace;
+  let bumpTex: Texture | null = null;
+  if (b) {
+    bumpTex = new CanvasTexture(b);
+    bumpTex.wrapS = bumpTex.wrapT = RepeatWrapping;
+    bumpTex.anisotropy = 4;
+  }
+  const out = { map, bump: bumpTex };
   textureCache.set(key, out);
   return out;
 }
@@ -274,6 +282,7 @@ function makeWoodTexture(seedKey: string, size: number): Texture {
   }
   const tex = new CanvasTexture(c);
   tex.wrapS = tex.wrapT = RepeatWrapping;
+  tex.colorSpace = SRGBColorSpace;
   tex.anisotropy = 4;
   return tex;
 }
@@ -381,9 +390,19 @@ function mergeRing(body: BufferGeometry, playerColor: number, accent: number): B
 let envTex: Texture | null = null;
 function buildEnvironment(): Texture | null {
   if (envTex) return envTex;
-  try { envTex = new PMREMGenerator().fromScene(new RoomEnvironment(), 0.04).texture; }
+  try { envTex = new PMREMGenerator(renderer).fromScene(new RoomEnvironment(renderer), 0.04).texture; }
   catch (e) { console.warn("environment:", e instanceof Error ? e.message : String(e)); }
   return envTex;
+}
+/** r160: scene.environment scaled by each standard material's envMapIntensity —
+ * give every standard/physical material the room as its own envMap. */
+function applyEnvMaps(): void {
+  const env = look?.reflections ? envTex : null;
+  scene.traverse((o) => {
+    const mat = (o as Mesh).material as Material | Material[] | undefined;
+    if (!mat) return;
+    for (const m of Array.isArray(mat) ? mat : [mat]) if (m instanceof MeshStandardMaterial) m.envMap = env;
+  });
 }
 
 // --- the board ---------------------------------------------------------------------------------
@@ -424,7 +443,7 @@ function buildBoard(): void {
   const L = look!, B = L.budget, detailed = L.detailed;
   const W = 14.6, D = 7.6, rimW = 0.55;
   let frameMat: Material, frameMatSide: Material, feltMat: Material, railMat: Material, tableMat: Material;
-  let pointTex: { map: Texture; normal: DataTexture | null } | null = null;
+  let pointTex: { map: Texture; bump: Texture | null } | null = null;
   // The field sits a shade darker than the theme felt so the light points stand out.
   const feltColor = hex(theme.felt).lerp(hex(theme.rail), 0.14);
   const feltHex = `#${feltColor.getHex().toString(16).padStart(6, "0")}`;
@@ -436,9 +455,9 @@ function buildBoard(): void {
     pointTex = makeLeatherMaps("#b0b0b0", T, B.bump);
     const pointMap = pointTex.map;
     pointMap.repeat.set(0.45, 0.45);
-    if (pointTex.normal) pointTex.normal.repeat.set(0.45, 0.45);
+    if (pointTex.bump) pointTex.bump.repeat.set(0.45, 0.45);
     leather.map.repeat.set(3, 1.5);
-    if (leather.normal) leather.normal.repeat.set(3, 1.5);
+    if (leather.bump) leather.bump.repeat.set(3, 1.5);
     frameMat = B.material === "physical"
       ? new MeshPhysicalMaterial({ color: theme.frame, map: wood.a, roughness: 0.42, metalness: 0, clearcoat: 0.35, clearcoatRoughness: 0.35, envMapIntensity: 0.3 })
       : new MeshStandardMaterial({ color: theme.frame, map: wood.a, roughness: 0.42, metalness: 0, envMapIntensity: 0.3 });
@@ -446,7 +465,7 @@ function buildBoard(): void {
     frameMatSide.map = wood.b;
     feltMat = new MeshStandardMaterial({
       color: 0xffffff, map: leather.map, roughness: 0.85, metalness: 0, envMapIntensity: 0.2,
-      ...(leather.normal ? { normalMap: leather.normal, normalScale: new Vector2(0.9, 0.9) } : {}),
+      ...(leather.bump ? { bumpMap: leather.bump, bumpScale: 0.9 } : {}),
     });
     railMat = new MeshStandardMaterial({ color: theme.rail, map: wood.b, roughness: 0.5, envMapIntensity: 0.3 });
     tableMat = new MeshStandardMaterial({ color: hex(theme.rail).multiplyScalar(0.55), map: wood.table, roughness: 0.62, envMapIntensity: 0.2 });
@@ -571,7 +590,7 @@ function buildBoard(): void {
   };
   const pointMat = (color: number): Material => new MeshStandardMaterial({
     color, roughness: 0.8, envMapIntensity: 0.2,
-    ...(pointTex ? { map: pointTex.map, ...(pointTex.normal ? { normalMap: pointTex.normal, normalScale: new Vector2(0.6, 0.6) } : {}) } : {}),
+    ...(pointTex ? { map: pointTex.map, ...(pointTex.bump ? { bumpMap: pointTex.bump, bumpScale: 0.6 } : {}) } : {}),
   });
   triMesh(triA, pointMat(theme.board));
   triMesh(triB, pointMat(theme.boardAlt));
@@ -597,6 +616,7 @@ function rebuildBoard(): void {
   buildMaterials();
   buildBoard();
   if (lastState) rebuildMarkers(lastState);
+  applyEnvMaps();
 }
 
 // --- markers --------------------------------------------------------------------------------
@@ -651,6 +671,7 @@ function rebuildMarkers(state: State): void {
     m.visible = true;
     markerMeshes.set(d.key, m);
   });
+  applyEnvMaps();
 }
 
 // --- tweens, effects, sync -----------------------------------------------------------------------
@@ -874,23 +895,20 @@ export function applyLook(next: Look): void {
   if (!built) build();
   const shadows = next.shadows > 0;
   renderer.shadowMap.enabled = shadows;
+  renderer.shadowMap.type = next.budget.softShadows ? PCFSoftShadowMap : PCFShadowMap;
   keyLight.castShadow = shadows;
   if (shadows) keyLight.shadow.mapSize = next.shadows;
-  keyLight.shadow.radius = next.budget.softShadows ? 3 : 1;
-  keyLight.shadow.distance = 40;
   rebuildBoard();
   // The lantern pool is part of the detailed look; Low skips the extra light entirely.
   lantern.visible = next.detailed;
   if (next.reflections) {
     scene.environment = buildEnvironment();
-    // Matched by eye to the browser build's High screenshot (three r160 + SwiftShader): the
-    // engine's room lights the diffuse leather and wood noticeably brighter.
-    scene.environmentIntensity = 0.3;
-    hemiLight.intensity = 0.22 / PI; // image-based light replaces part of the flat fill
+    hemiLight.intensity = 0.22; // image-based light replaces part of the flat fill
   } else {
     scene.environment = null;
-    hemiLight.intensity = 0.55 / PI;
+    hemiLight.intensity = 0.55;
   }
+  applyEnvMaps();
   if (particles) {
     const high = next.particles === "high";
     particles.mat.size = high ? 0.1 : 0.09;

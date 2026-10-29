@@ -11,7 +11,7 @@
 | Genre | Turn-based race board game (original rules family, two rulesets) |
 | Players | 1 human vs 1–3 deterministic AI rivals; 2-human pass-and-play on one device (practice only) |
 | Session length | Practice duel 10–20 min; lessons 1–3 min; endgame stages 3–6 min; four-caravan circuits up to 25 min |
-| Platforms | StarHermit engine 1.24.0 script game (host API 1.21): natively in the StarHermit client and in desktop and mobile browsers through the engine's web runtime; portrait and landscape |
+| Platforms | StarHermit engine 1.26.1 script game (host API 1.28): natively in the StarHermit client and in desktop and mobile browsers through the engine's web runtime; portrait and landscape |
 | Rendering | `starhermit:scene` (three.js-like) perspective scene, all geometry procedural, the engine's post effects; the HUD and screens in `starhermit:ui` over it |
 | Offline | Fully playable without any server; a guest makes no platform call. The daily's UTC day is the device's clock |
 
@@ -19,7 +19,7 @@ File map (everything that ships or is run):
 
 | Path | Responsibility |
 |---|---|
-| `starhermit.txt` | Manifest: name, description, owner, `server=score-script.js`, cover, `launch=index.html`, `engine.*` (api 1, entry `native/main.ts`, version 1.24.0, minor 16, capabilities platform, storage, clipboard), `control.*` keys and `engine.gamepad.*` pads |
+| `starhermit.txt` | Manifest: name, description, owner, `server=score-script.js`, cover, `launch=index.html`, `engine.*` (api 1, entry `native/main.ts`, version 1.26.1, minor 28, capabilities platform, storage, clipboard), `control.*` keys and `engine.gamepad.*` pads |
 | `index.html`, `starhermit-files.json` | The engine's web loader and file index, written by `npm run package` (`starhermit package --web .`); never edited |
 | `native/main.ts` | Entry module: session controller (`Session`), goals, stars, achievements, app phases, commands, selection, the board cursor, pause / leave / restart, results, input (actions, pointer, touch) |
 | `native/screens.ts` | HUD, rails, tray, lesson card, stakes and pause dialogs, toasts and the full-window screens in `starhermit:ui`; layouts by window size; frames the board in what the HUD leaves |
@@ -179,7 +179,7 @@ High-contrast mode swaps the UI tokens to pure black / white / `#ffdf4d`. The hu
 
 **Shape and material.** Boxes, cylinders, lathes and flat inlays only, all procedural. The board rests on a dark wooden tabletop that fades into the fog. The leather field is a shade darker than the theme felt; points are flat inlaid triangles in two alternating leather tones with a dark inlay border, merged into one mesh per tone, tapering toward the bar. PBR materials with ACES tone mapping at exposure 1.05 and sRGB output; one warm key light (`#fff1d6`) whose shadow frustum is fitted to the play area in light space, a cool hemisphere fill, a cool rim and (detailed tier) a warm lantern point light off the far-left corner, echoing the key art. Plain detail uses a seeded 128 px speckle (`makeLeatherTexture`) and cylinder markers; detailed uses seeded 512 px leather colour + bump maps with mottling, pores and creases (`makeLeatherMaps`), wood-grain maps on the lacquered walnut frame, bar and table (`makeWoodTexture`), saddle stitching around the field (one instanced mesh), brass hinges at the fold, and bevelled lathe markers with a groove under the brass ring in clearcoated `MeshPhysicalMaterial` (`makeMarkerGeometry`).
 
-**Graphics.** Effects by preset: key-light shadows (1024 / 2048 / 4096, held by the runtime to the level's shadow cap; soft edges on High/Ultra), ambient occlusion (`renderer.ao`, GTAO settings of the browser chain; particles and selection decals left out with `noAO`), bloom limited to highlights and sparks (threshold 0.9, strength 0.3, the budget's resolution), the display-space colour grade (warm highlights, cooler shadows, gentle S-curve, vignette 0.28), FXAA / SMAA / MSAA, image-based reflections from `PMREMGenerator.fromScene(new RoomEnvironment(), 0.04)` (environment intensity 0.3, matched by eye to the browser build), the detailed board textures and geometry above, particle bursts (Low halves the counts; High/Ultra use additive sparks that bloom) and ambient motion (lantern flicker and drifting dust motes, stopped by reduced motion). Selection rings and target discs are not tone-mapped. The runtime's Options › Graphics owns Auto and the ten levels, render scale, the frame-rate limit and readout; the game picks its preset from `frame().quality` and scales sparks and motes within it by `frame().levelIndex` (≤ 2×), rebuilding board and markers when the budget changes (`native/quality.ts`). Low renders without post effects, lantern, environment or motes (MSAA on).
+**Graphics.** Effects by preset: key-light shadows (1024 / 2048 / 4096, held by the runtime to the level's shadow cap; soft edges on High/Ultra), ambient occlusion (`renderer.ao`, GTAO settings of the browser chain; particles and selection decals left out with `noAO`), bloom limited to highlights and sparks (threshold 0.9, strength 0.3, the budget's resolution), the display-space colour grade (warm highlights, cooler shadows, gentle S-curve, vignette 0.28), FXAA / SMAA / MSAA, image-based reflections from `new PMREMGenerator(renderer).fromScene(new RoomEnvironment(renderer), 0.04)` as each standard material's own envMap at the browser build's envMapIntensity (three r160 scaled scene.environment per material), the detailed board textures and geometry above, particle bursts (Low halves the counts; High/Ultra use additive sparks that bloom) and ambient motion (lantern flicker and drifting dust motes, stopped by reduced motion). Selection rings and target discs are not tone-mapped. The runtime's Options › Graphics owns Auto and the ten levels, render scale, the frame-rate limit and readout; the game picks its preset from `frame().quality` and scales sparks and motes within it by `frame().levelIndex` (≤ 2×), rebuilding board and markers when the budget changes (`native/quality.ts`). Low renders without post effects, lantern, environment or motes (MSAA on).
 
 **Typography.** System UI stack (`system-ui, -apple-system, Segoe UI, Roboto`), title in accent brass with 0.06em tracking, rail titles uppercase 0.78em with 0.14em tracking, key names in the bindings line; the runtime's text size scales everything.
 
@@ -189,14 +189,14 @@ High-contrast mode swaps the UI tokens to pure black / white / `#ffdf4d`. The hu
 
 **Presets and per-preset budgets** (`native/quality.ts`, the browser build's `TABLE` and `BUDGETS`; each was tuned to hold 60 FPS on the weakest GPU its Auto gave it). Low: no post effects, shadows, environment, lantern or motes, MSAA. Balanced: 1024 shadows, grade, FXAA, reflections, detailed board, no bloom. High: 2048 shadows, AO, bloom, grade, SMAA. Ultra: 4096 shadows, full AO, bloom, grade, MSAA.
 
-| Preset | Markers | Materials | Leather / wood textures (detail on) | Leather relief (normal map) | Shadow filter | Spark pool | Dust motes | Bloom resolution |
+| Preset | Markers | Materials | Leather / wood textures (detail on) | Leather relief (bump map) | Shadow filter | Spark pool | Dust motes | Bloom resolution |
 |---|---|---|---|---|---|---|---|---|
 | Low | 16-sided cylinder, cap ring merged in (1 draw) | Lambert board and markers, low-metal standard brass | — | — | — | 120 | 0 | ½ |
 | Balanced | 24-segment lathed bevel, cap ring merged in | Standard (no clearcoat) | 256 px | off | PCF | 240 | 24 | ½ |
 | High | 32-segment lathe + separate metallic ring | clearcoat Physical lacquer | 512 px | on | PCF soft | 240 | 40 | ¾ |
 | Ultra | 48-segment lathe + separate metallic ring | clearcoat Physical lacquer | 1024 px (finer pores; mottling drawn at 512 and scaled) | on | PCF soft | 480 | 80 | full |
 
-Textures (OffscreenCanvas `CanvasTexture`s, the relief as a `DataTexture` normal map) and meshes are generated procedurally and cached per theme and budget. Gameplay is identical on every preset.
+Textures (OffscreenCanvas `CanvasTexture`s, the relief as a bump map, colour maps sRGB as in the browser build) and meshes are generated procedurally and cached per theme and budget. Gameplay is identical on every preset.
 
 ## 9. Audio direction
 
