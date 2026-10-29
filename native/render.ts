@@ -921,7 +921,8 @@ export function applyLook(next: Look): void {
     denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: next.ao === "high" ? 6 : 4, rings: 2, samples: next.ao === "high" ? 16 : 8, radiusExponent: 2 },
   };
   // High threshold: only brass glints and sparks bloom.
-  renderer.bloom = next.bloom ? { strength: 0.3, radius: 0.35, threshold: 0.9, resolution: next.budget.bloomRes } : null;
+  // The page's r160 UnrealBloomPass strength squared (minor 29 bloom follows r185).
+  renderer.bloom = next.bloom ? { strength: 0.09, radius: 0.35, threshold: 0.9, resolution: next.budget.bloomRes } : null;
   // The grade ShaderPass after OutputPass: a gentle S-curve, a touch more
   // saturation, warm highlights and cooler shadows, a soft vignette.
   renderer.grade = next.grade ? {
