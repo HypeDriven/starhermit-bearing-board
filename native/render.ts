@@ -921,12 +921,12 @@ export function applyLook(next: Look): void {
     denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: next.ao === "high" ? 6 : 4, rings: 2, samples: next.ao === "high" ? 16 : 8, radiusExponent: 2 },
   };
   // High threshold: only brass glints and sparks bloom.
-  // The page's r160 UnrealBloomPass strength squared (minor 29 bloom follows r185).
-  renderer.bloom = next.bloom ? { strength: 0.09, radius: 0.35, threshold: 0.9, resolution: next.budget.bloomRes } : null;
+  // The page's r160 UnrealBloomPass at its own strength (bloom model r160).
+  renderer.bloom = next.bloom ? { model: "r160", strength: 0.3, radius: 0.35, threshold: 0.9, resolution: next.budget.bloomRes } : null;
   // The grade ShaderPass after OutputPass: a gentle S-curve, a touch more
   // saturation, warm highlights and cooler shadows, a soft vignette.
   renderer.grade = next.grade ? {
-    space: "display", contrast: 0.09, saturation: 1.07,
+    space: "display", contrastCurve: "s", contrast: 0.18, saturation: 1.07, levels: [0.975, 0.018],
     shadows: [0.97, 0.98, 1.04], highlights: [1.04, 1.0, 0.95], split: [0.2, 0.8],
     vignette: { amount: 0.28, inner: 0.38, outer: 0.9, scale: [1.1, 1] },
   } : null;
