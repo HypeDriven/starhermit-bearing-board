@@ -840,9 +840,9 @@ function updateParticles(dt: number): void {
   });
   if (any) {
     const g = particles.points.geometry;
-    g.getAttribute("position")!.array = pos;
+    (g.getAttribute("position") as BufferAttribute).array = pos;
     g.getAttribute("position")!.needsUpdate = true;
-    g.getAttribute("color")!.array = col;
+    (g.getAttribute("color") as BufferAttribute).array = col;
     g.getAttribute("color")!.needsUpdate = true;
   }
 }
@@ -869,7 +869,7 @@ function updateMotes(t: number): void {
     pos[i * 3 + 1] = m.y + Math.sin(t * m.s * 0.7 + m.p * 2) * 0.35;
     pos[i * 3 + 2] = m.z + Math.cos(t * m.s * 0.8 + m.p) * 0.5;
   });
-  const a = motes.points.geometry.getAttribute("position")!;
+  const a = (motes.points.geometry.getAttribute("position") as BufferAttribute);
   a.array = pos;
   a.needsUpdate = true;
 }
