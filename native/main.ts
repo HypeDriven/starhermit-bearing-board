@@ -8,7 +8,7 @@
 // platform platform.ts. App phases: title → menus (journey | learn |
 // challenges | setup) → game ↔ paused → results → title, with settings and
 // help from the title or the pause card.
-import { clipboard, frame, onPreferencesChange, onRender, onResume, onStart, onSuspend, onUpdate, preferences } from "starhermit:engine";
+import { clipboard, frame, levelSettings, onPreferencesChange, onRender, onResume, onStart, onSuspend, onUpdate, preferences } from "starhermit:engine";
 import { onAction, onPointerButton, onPointerMove, onTouch, vibrate } from "starhermit:input";
 import * as ui from "starhermit:ui";
 import { onSessionEnded } from "starhermit:platform";
@@ -411,10 +411,10 @@ export function profileName(): string {
 let lookKey = "";
 function applyLook(): void {
   const f = frame();
-  const key = `${f.quality}:${f.levelIndex}`;
+  const key = f.level;
   if (key === lookKey) return;
   lookKey = key;
-  render.applyLook(lookFor(f.quality, f.levelIndex));
+  render.applyLook(lookFor(levelSettings(f.level)));
 }
 
 onStart(() => {

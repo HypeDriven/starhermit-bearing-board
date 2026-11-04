@@ -897,6 +897,7 @@ export function applyLook(next: Look): void {
   renderer.shadowMap.enabled = shadows;
   renderer.shadowMap.type = next.budget.softShadows ? PCFSoftShadowMap : PCFShadowMap;
   keyLight.castShadow = shadows;
+  // Since minor 23 the engine keeps the game's mapSize whatever the level, so the level's size is set here.
   if (shadows) keyLight.shadow.mapSize = next.shadows;
   rebuildBoard();
   // The lantern pool is part of the detailed look; Low skips the extra light entirely.
@@ -914,15 +915,18 @@ export function applyLook(next: Look): void {
     particles.mat.size = high ? 0.1 : 0.09;
     particles.mat.blending = high ? AdditiveBlending : NormalBlending;
   }
-  // The browser build's composer chain per preset.
-  renderer.ao = next.ao === "off" ? null : {
-    blendIntensity: next.ao === "high" ? 0.85 : 0.7, radius: 0.45, distanceExponent: 1.4, thickness: 1.0, scale: 1.0,
-    samples: next.ao === "high" ? 16 : 8,
-    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: next.ao === "high" ? 6 : 4, rings: 2, samples: next.ao === "high" ? 16 : 8, radiusExponent: 2 },
+  // The browser build's composer chain, with the level's effects (levelSettings()): which run,
+  // AO's resolution and samples, bloom's resolution. Full-resolution AO (the engine's "high")
+  // takes the browser's Ultra blend and denoise radius.
+  const ao = next.ao, full = !!ao && ao.resolution >= 1;
+  renderer.ao = ao && {
+    blendIntensity: full ? 0.85 : 0.7, radius: 0.45, distanceExponent: 1.4, thickness: 1.0, scale: 1.0,
+    samples: ao.samples, resolution: ao.resolution,
+    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: full ? 6 : 4, rings: 2, samples: ao.denoiseSamples, radiusExponent: 2 },
   };
   // High threshold: only brass glints and sparks bloom.
   // The page's r160 UnrealBloomPass at its own strength (bloom model r160).
-  renderer.bloom = next.bloom ? { model: "r160", strength: 0.3, radius: 0.35, threshold: 0.9, resolution: next.budget.bloomRes } : null;
+  renderer.bloom = next.bloom === null ? null : { model: "r160", strength: 0.3, radius: 0.35, threshold: 0.9, resolution: next.bloom };
   // The grade ShaderPass after OutputPass: a gentle S-curve, a touch more
   // saturation, warm highlights and cooler shadows, a soft vignette.
   renderer.grade = next.grade ? {

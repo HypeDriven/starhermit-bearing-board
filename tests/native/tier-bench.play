@@ -1,0 +1,91 @@
+# Graphics-tier bench (tools/engine-tier-bench.mjs): Practice (Steady, Casual, seed 4242) through the
+# real UI, settle on the table 120 frames, then measure the first turn (dice roll, both moves), the
+# AI's turn and the idle table after it (lantern flicker, motes): about 600 frames.
+until 300 Play now
+frames 30
+click Practice setup
+until 60 Start table
+click Steady — Solid one-move judgement.
+frames 10
+click Casual — Plays loose and friendly. Good for learning.
+frames 10
+click random
+type 4242
+frames 4
+click Start table
+until 120 You to roll
+until 1200 You to roll
+frames 120
+measure start
+frames 2
+key KeyR 2
+until 600 You to move
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key Enter 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key Enter 1
+frames 2
+until 600 You to move
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key Enter 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key ArrowRight 1
+key Enter 1
+frames 2
+until 1200 You to roll
+frames 300
+measure stop
