@@ -46,8 +46,10 @@ function layoutNow(): Layout {
 }
 const GAP = 8;
 
-/** Button rows that wrap as the browser's flex-wrap did; `fill` stretches each row's buttons. */
+/** Button rows that wrap as the browser's flex-wrap did (the engine's wrapping row); `fill`
+ * stretches each line's buttons, which needs the lines, so that case still packs them here. */
 function flow(id: string, items: { label: string; w?: number; build: (w: number | undefined) => void }[], width: number, opts: { fill?: boolean; justify?: ui.Layout["justify"] } = {}): ui.Rect {
+  if (!opts.fill) return ui.row(id, () => { for (const it of items) it.build(undefined); }, { wrap: true, width, gap: GAP, justify: opts.justify ?? "center" });
   const L = layoutNow();
   const rows: (typeof items)[] = [[]];
   let used = 0;
@@ -62,7 +64,7 @@ function flow(id: string, items: { label: string; w?: number; build: (w: number 
       // Stretched rows share the width equally when every button fits its share, else by their widths.
       const share = (width - GAP * (row.length - 1)) / row.length;
       const used = row.reduce((a, it) => a + it.w!, 0) + GAP * (row.length - 1);
-      const each = (it: { w?: number }): number | undefined => (!opts.fill ? undefined : row.every((r) => r.w! <= share) ? share : it.w! + (width - used) / row.length);
+      const each = (it: { w?: number }): number | undefined => (row.every((r) => r.w! <= share) ? share : it.w! + (width - used) / row.length);
       ui.row(`${id}-${n}`, () => { for (const it of row) it.build(each(it)); }, { spacing: GAP, justify: opts.justify ?? "center", width });
     });
   }, { spacing: GAP, width });
@@ -193,7 +195,7 @@ function hudTop(L: Layout): ui.Rect {
   }, { spacing: GAP, width });
 }
 
-function railLeft(L: Layout, x: number, y: number, w: number, h: number, side: "start" | "end"): ui.Rect {
+function railLeft(_L: Layout, x: number, y: number, w: number, h: number, side: "start" | "end"): ui.Rect {
   const s = app.session!, st = s.state, def = s.def;
   const inner = w - 26;
   return ui.place("rail-left", { anchor: side === "start" ? "top-start" : "top-end", x, y }, () => {
@@ -203,7 +205,7 @@ function railLeft(L: Layout, x: number, y: number, w: number, h: number, side: "
       [def.ranked ? t("badge.ranked") : t("badge.unranked"), !!def.ranked]];
     if ((def.options as { cube?: boolean } | undefined)?.cube) badges.push([t("badge.stakes", { n: st.cube.value }), false]);
     flow("badges", badges.map(([text, on], i) => ({
-      label: text, w: ui.measureText(text, { style: "badge" }).width / L.sc + 2,
+      label: text,
       build: () => { ui.id(`badge-${i}`).style("badge", on && "badge-on").label(text); },
     })), inner, { justify: "start" });
     ui.style("rail-title").label(t("rail.progress"));
@@ -675,7 +677,7 @@ function helpScreen(L: Layout): void {
           flow("legend", theme.players.slice(0, 4).map((c: number, i: number) => {
             const text = i === 0 ? t("help.you") : t("help.rival", { n: i });
             return {
-              label: text, w: ui.measureText(text, { style: "badge" }).width / L.sc + 26,
+              label: text,
               build: () => {
                 ui.row(`legend-${i}`, () => {
                   ui.id(`legend-sw-${i}`).widget("", { role: "none", size: { width: 14, height: 14 }, draw: (r) => { draw.roundRect(r.x, r.y, r.width, r.height, r.width / 2, `#${c.toString(16).padStart(6, "0")}`); } });

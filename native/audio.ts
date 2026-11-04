@@ -12,9 +12,8 @@
 // live synthesis graph: the engine's browser runtime drops clip loads while
 // a graph changes (see the arrow-exodus port). For the same reason the
 // browser build's synthesized stand-ins for clips still loading are not
-// ported: clips load once the mixer runs (natively at once, in a browser
-// after the first press) and a cue before that is silent; every cue has a
-// visual or announced twin.
+// ported: every clip loads at start (onStart) and a cue whose clip is still
+// loading is silent; every cue has a visual or announced twin.
 import { context, createClip, loadClip, play as playClip, type AudioClip, type Bus, type Sound } from "starhermit:audio";
 import { createRng, hashSeed } from "../js/rules.js";
 
@@ -31,12 +30,12 @@ const EFFECTS = 0.8, MUSIC = 0.45, AMBIENCE = 0.35, VOICE = 0.7;
 const VOICE_CUES = new Set(["win", "lose", "stars", "unlock"]);
 
 const clips = new Map<string, AudioClip>();
-let wantClips = false;
-function load(file: string): void {
-  loadClip(`sfx/${file}.opus`).then((c) => { clips.set(file, c); }, (e: unknown) => console.warn(`sfx ${file}: ${String(e)}`));
+/** Loads every clip at once (onStart); a cue whose clip is still loading is skipped. */
+export function loadSfx(): void {
+  for (const file of new Set(Object.values(SAMPLES))) {
+    loadClip(`sfx/${file}.opus`).then((c) => { clips.set(file, c); }, (e: unknown) => console.warn(`sfx ${file}: ${String(e)}`));
+  }
 }
-/** Loads every clip once the mixer runs. */
-export function loadSfx(): void { wantClips = true; poll(); }
 
 /** Plays a logical event's cue (Audio.playEvent in the browser build). */
 export function playEvent(name: string): void {
@@ -45,7 +44,7 @@ export function playEvent(name: string): void {
   if (!clip) return;
   const bus: Bus = INTERFACE.has(name) ? "interface" : "effects";
   try { playClip(clip, { bus, gain: VOICE_CUES.has(name) ? VOICE : EFFECTS }); }
-  catch { clips.delete(file!); load(file!); } // a clip the mixer lost: load it again
+  catch { /* the mixer is full this frame: skip it */ }
 }
 
 // -- the ambience bed and the music pad, rendered into clips ---------------------------------------
@@ -162,8 +161,7 @@ function tick(): void {
 
 /** Called each frame: starts what waited for the mixer, renders one pending clip. */
 export function poll(): void {
-  if (context.state !== "running") return;
-  if (wantClips) { wantClips = false; for (const file of new Set(Object.values(SAMPLES))) load(file); }
+  if (context.state !== "running") return; // starting the bed still waits for the mixer
   if (wantBed && (!bed || bed.theme !== wantBed || !bed.sound)) {
     try {
       if (!bed || bed.theme !== wantBed) { try { bed?.sound?.stop(); } catch { /* gone */ } bed = { theme: wantBed, sound: null, clip: bedClip(wantBed) }; return; }

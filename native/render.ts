@@ -7,7 +7,7 @@
 // consumes rules states plus their events and never mutates rules state.
 //
 // What changed from three.js, and why:
-// - LatheGeometry is lathe() below; Phong brass on Low is a standard material.
+// - Phong brass on Low is a standard material.
 // - The EffectComposer chain (GTAO, UnrealBloom, the grade ShaderPass,
 //   SMAA / FXAA / MSAA) is renderer.ao / bloom / grade / antialias; the
 //   grade is the built-in display-space grade with the same curve, tints and
@@ -23,10 +23,10 @@
 import {
   ACESFilmicToneMapping, AdditiveBlending, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture,
   Box3, CircleGeometry, Color, CylinderGeometry, DirectionalLight, Fog, Group,
-  HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshLambertMaterial,
+  HemisphereLight, InstancedMesh, LatheGeometry, Matrix4, Mesh, MeshBasicMaterial, MeshLambertMaterial,
   MeshPhysicalMaterial, MeshStandardMaterial, NormalBlending, OrthographicCamera, PCFShadowMap, PCFSoftShadowMap, PMREMGenerator, PerspectiveCamera, RoomEnvironment,
   PlaneGeometry, PointLight, Points, PointsMaterial, Quaternion, Raycaster, RepeatWrapping,
-  RingGeometry, SRGBColorSpace, TorusGeometry, Vector3, pointerToNdc, renderer, scene,
+  RingGeometry, SRGBColorSpace, TorusGeometry, Vector2, Vector3, pointerToNdc, renderer, scene,
 } from "starhermit:scene";
 import type { Material, Texture } from "starhermit:scene";
 import { OffscreenCanvas } from "starhermit:canvas";
@@ -302,42 +302,6 @@ function woodTextures(key: string, size: number): { a: Texture; b: Texture; tabl
   return out;
 }
 
-/** three.js LatheGeometry: a profile (x radius, y height) turned about the y axis. */
-function lathe(points: [number, number][], segments: number): BufferGeometry {
-  const n = points.length;
-  // Profile normals: perpendicular to the averaged tangents, as three.js computes them.
-  const pn: [number, number][] = [];
-  for (let j = 0; j < n; j++) {
-    const prev = points[Math.max(0, j - 1)]!, next = points[Math.min(n - 1, j + 1)]!;
-    const dx = next[0] - prev[0], dy = next[1] - prev[1];
-    const l = Math.hypot(dx, dy) || 1;
-    pn.push([dy / l, -dx / l]);
-  }
-  const pos: number[] = [], nrm: number[] = [], uv: number[] = [], idx: number[] = [];
-  for (let i = 0; i <= segments; i++) {
-    const phi = (i / segments) * PI * 2, s = Math.sin(phi), c = Math.cos(phi);
-    for (let j = 0; j < n; j++) {
-      const [r, y] = points[j]!;
-      pos.push(r * s, y, r * c);
-      nrm.push(pn[j]![0] * s, pn[j]![1], pn[j]![0] * c);
-      uv.push(i / segments, j / (n - 1));
-    }
-  }
-  for (let i = 0; i < segments; i++) {
-    for (let j = 0; j < n - 1; j++) {
-      const a = i * n + j, b = a + n, c2 = b + 1, d = a + 1;
-      idx.push(a, b, d, c2, d, b);
-    }
-  }
-  const geo = new BufferGeometry();
-  geo.setAttribute("position", new BufferAttribute(new Float32Array(pos), 3));
-  geo.setAttribute("normal", new BufferAttribute(new Float32Array(nrm), 3));
-  geo.setAttribute("uv", new BufferAttribute(new Float32Array(uv), 2));
-  geo.setIndex(idx);
-  geo.computeBoundingSphere();
-  return geo;
-}
-
 /** Bevelled marker: rounded rims and a shallow groove inside the brass ring. */
 function makeMarkerGeometry(detailed: boolean, segments: number): BufferGeometry {
   const R = LAYOUT.markR, H = LAYOUT.markH;
@@ -354,7 +318,7 @@ function makeMarkerGeometry(detailed: boolean, segments: number): BufferGeometry
     pts.push([R - bev + Math.cos(a) * bev, H / 2 - bev + Math.sin(a) * bev]);
   }
   pts.push([R * 0.8, H / 2], [R * 0.74, H / 2 - 0.012], [R * 0.5, H / 2 - 0.012], [R * 0.44, H / 2 - 0.004], [0, H / 2 - 0.004]);
-  return lathe(pts, segments);
+  return new LatheGeometry(pts.map(([x, y]) => new Vector2(x, y)), segments);
 }
 
 const capRingGeo = new TorusGeometry(LAYOUT.markR * 0.62, 0.022, 8, 22);
