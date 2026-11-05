@@ -25,8 +25,6 @@ File map (everything that ships or is run):
 | `native/screens.ts` | HUD, rails, tray, lesson card, stakes and pause dialogs, toasts and the full-window screens in `starhermit:ui`; layouts by window size; frames the board in what the HUD leaves |
 | `native/render.ts` | The board scene: procedural leather, wood and brass, markers, selection decals, cursor ring, tweens, sparks, motes, camera framing (view offset), picking by hit boxes |
 | `native/quality.ts` | The four presets and their budgets by the runtime's quality tier and level |
-
-Low (quantum) keeps MSAA instead of the level's "off" until engine 1.36.2: engine 1.36.1 recolours fog, haze and translucent overlays without anti-aliasing.
 | `native/audio.ts` | Sample cues on the runtime's mixer, the ambience bed and music pad rendered into clips |
 | `native/platform.ts` | Save (progress) with conflict merge and foreign-save migration, the game's settings and legacy-settings migration, device storage, invite link, leaderboard posting |
 | `native/i18n.ts`, `native/names.ts`, `native/style.ts` | Locale from the runtime's language; content names; UI styles from `assets/ui-style.json` |
