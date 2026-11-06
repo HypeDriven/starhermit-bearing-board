@@ -19,7 +19,7 @@ import * as render from "./render.ts";
 import * as audio from "./audio.ts";
 import * as platform from "./platform.ts";
 import { lookFor } from "./quality.ts";
-import { onLanguage, t } from "./i18n.ts";
+import { t } from "./i18n.ts";
 import { achDesc, achLabel, defName, fmtClock, type Def } from "./names.ts";
 import { setStyle } from "./style.ts";
 import { drawScreens } from "./screens.ts";
@@ -377,7 +377,6 @@ export const app = {
   selection: null as { from: number | "rail"; moves: Move[] } | null,
   /** The keyboard / pad board cursor: points 0–23, 24 the rail, 25 the off tray. */
   cursor: null as number | null,
-  toast: null as { text: string; until: number } | null,
   settings: platform.DEFAULT_SETTINGS as platform.Settings,
   resultsPending: false,
   setup: { ruleset: 0, difficulty: 1, players: 0, humans: 0, theme: 0, seed: "" },
@@ -389,7 +388,12 @@ export function announce(text: string, assertive = false): void {
   if (!text) return;
   try { ui.announce(text.slice(0, 500), { politeness: assertive ? "assertive" : "polite" }); } catch { /* too many at once */ }
 }
-export function toast(text: string, ms = 2600): void { app.toast = { text, until: nowMs() + ms }; }
+let shownToast: ui.Toast | null = null;
+/** One toast at a time, below the HUD (the stack's margin is 16). Its callers announce what needs it. */
+export function toast(text: string, ms = 2600): void {
+  shownToast?.dismiss();
+  shownToast = ui.toast!(text, { duration: ms / 1000, style: "toast", dismissible: false, announce: false, position: "top", offset: 48 });
+}
 function haptic(ms: number): void { if (app.settings.haptics) vibrate(ms); }
 
 export function seatName(seat: number): string {
@@ -429,13 +433,12 @@ onStart(() => {
   showTitle();
 });
 onPreferencesChange((p) => render.setReducedMotion(p.reducedMotion));
-onLanguage(() => { /* every screen is rebuilt each frame */ });
 platform.onProgressMerged(() => toast(t("toast.merged")));
 platform.onSettingsChange(() => {
   app.settings = platform.loadSettings();
   if (!app.session || app.phase !== "game") render.setTheme(app.settings.theme);
 });
-onSessionEnded(() => toast(t("acc.signedOut")));
+onSessionEnded(() => toast(t("starhermit.signedOut")));
 onSuspend(() => {
   // Backgrounding pauses a local game (the runtime stops frames and audio).
   if (app.phase === "game" && app.session && !app.session.over && !app.paused) pauseGame();
@@ -814,8 +817,8 @@ export function copyReplay(): void {
 export function copyInvite(): void {
   const link = platform.inviteLink();
   if (!link) return;
-  try { clipboard.writeText(link); toast(t("acc.inviteCopied")); }
-  catch { toast(`${t("acc.inviteFailed")} ${link}`, 6000); }
+  try { clipboard.writeText(link); toast(t("starhermit.inviteCopied")); }
+  catch { toast(t("starhermit.inviteLink", { link }), 6000); }
 }
 
 // ------------------------------------------------------------------ settings
@@ -921,6 +924,5 @@ onUpdate((dt) => {
   audio.poll();
   render.update(dt);
   showCursor();
-  if (app.toast && nowMs() > app.toast.until) app.toast = null;
 });
 onRender(() => { drawScreens(); });

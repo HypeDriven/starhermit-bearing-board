@@ -751,7 +751,7 @@ export function setCursor(spot: Spot | null): void {
 
 // --- particles and motes --------------------------------------------------------------------------
 interface Particle { life: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; r: number; g: number; b: number }
-let particles: { points: Points; mat: PointsMaterial; pos: Float32Array; col: Float32Array; data: Particle[]; cursor: number } | null = null;
+let particles: { points: Points; mat: PointsMaterial; pos: Float32Array; col: Float32Array; data: Particle[]; cursor: number; idle: boolean } | null = null;
 function buildParticles(): void {
   const geo = new BufferGeometry();
   const pos = new Float32Array(PARTICLE_MAX * 3), col = new Float32Array(PARTICLE_MAX * 3);
@@ -762,7 +762,7 @@ function buildParticles(): void {
   const points = new Points(geo, mat);
   points.frustumCulled = false;
   fxGroup.add(points);
-  particles = { points, mat, pos, col, data: Array.from({ length: PARTICLE_MAX }, () => ({ life: 0, x: 0, y: -99, z: 0, vx: 0, vy: 0, vz: 0, r: 1, g: 1, b: 1 })), cursor: 0 };
+  particles = { points, mat, pos, col, data: Array.from({ length: PARTICLE_MAX }, () => ({ life: 0, x: 0, y: -99, z: 0, vx: 0, vy: 0, vz: 0, r: 1, g: 1, b: 1 })), cursor: 0, idle: true };
 }
 let fxSeed = 1;
 function burst(x: number, y: number, z: number, color: number, n: number): void {
@@ -771,6 +771,7 @@ function burst(x: number, y: number, z: number, color: number, n: number): void 
   const B = look.budget;
   n = Math.max(1, Math.min(B.particles, Math.round(n * B.burst)));
   const c = hex(color);
+  particles.idle = false;
   const rng = Rules.createRng(Rules.hashSeed(`fx:${x}:${z}:${fxSeed++}`));
   for (let i = 0; i < n; i++) {
     const p = particles.data[particles.cursor]!;
@@ -784,7 +785,7 @@ function burst(x: number, y: number, z: number, color: number, n: number): void 
   }
 }
 function updateParticles(dt: number): void {
-  if (!particles) return;
+  if (!particles || particles.idle) return; // stays in script: sparks bounce off the board
   const { pos, col } = particles;
   let any = false;
   particles.data.forEach((p, i) => {
@@ -808,7 +809,7 @@ function updateParticles(dt: number): void {
     g.getAttribute("position")!.needsUpdate = true;
     (g.getAttribute("color") as BufferAttribute).array = col;
     g.getAttribute("color")!.needsUpdate = true;
-  }
+  } else particles.idle = true;
 }
 
 let motes: { points: Points; pos: Float32Array; seeds: { x: number; y: number; z: number; p: number; s: number }[] } | null = null;

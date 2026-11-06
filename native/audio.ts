@@ -7,14 +7,11 @@
 // interface clicks (ack, tick, select) on "interface", the pad and the bed on
 // "music", each at the level the browser build's default bus volume gave it.
 //
-// The bed and the pad chords are rendered once into clips (createClip) with
-// the same noise, oscillators, filter and envelopes rather than run as a
-// live synthesis graph: the engine's browser runtime drops clip loads while
-// a graph changes (see the arrow-exodus port). For the same reason the
-// browser build's synthesized stand-ins for clips still loading are not
-// ported: every clip loads at start (onStart) and a cue whose clip is still
-// loading is silent; every cue has a visual or announced twin.
-import { context, createClip, loadClip, play as playClip, type AudioClip, type Bus, type Sound } from "starhermit:audio";
+// The bed and the pad chords are rendered once into clips by the engine's
+// OfflineAudioContext (noise, oscillators, filter and envelopes natively). Every
+// clip loads at start (onStart) and a cue whose clip is still loading is silent;
+// every cue has a visual or announced twin.
+import { OfflineAudioContext, context, createClip, loadClip, play as playClip, type AudioClip, type Bus, type Sound } from "starhermit:audio";
 import { createRng, hashSeed } from "../js/rules.js";
 
 const SAMPLES: Record<string, string> = {
@@ -28,6 +25,8 @@ const INTERFACE = new Set(["ack", "tick", "select"]);
 // The browser build's default bus volumes: music 0.45, effects 0.8, ambience 0.35, voice 0.7.
 const EFFECTS = 0.8, MUSIC = 0.45, AMBIENCE = 0.35, VOICE = 0.7;
 const VOICE_CUES = new Set(["win", "lose", "stars", "unlock"]);
+/** Measured: brown noise through the filter reads rms .199, the old bed .169 (within 0.5 dB per theme). */
+const BED_MAKEUP = 0.85;
 
 const clips = new Map<string, AudioClip>();
 /** Loads every clip at once (onStart); a cue whose clip is still loading is skipped. */
@@ -49,61 +48,32 @@ export function playEvent(name: string): void {
 
 // -- the ambience bed and the music pad, rendered into clips ---------------------------------------
 const RATE = 8000;
-/** RBJ biquad lowpass over `x` in place (Web Audio's BiquadFilterNode, Q as linear). */
-function lowpass(x: Float32Array, freq: number, q: number): void {
-  const w = 2 * Math.PI * freq / RATE, alpha = Math.sin(w) / (2 * q), c = Math.cos(w);
-  const a0 = 1 + alpha;
-  const b0 = (1 - c) / 2 / a0, b1 = (1 - c) / a0, b2 = b0, a1 = -2 * c / a0, a2 = (1 - alpha) / a0;
-  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
-  for (let i = 0; i < x.length; i++) {
-    const x0 = x[i]!;
-    const y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
-    x2 = x1; x1 = x0; y2 = y1; y1 = y0;
-    x[i] = y0;
-  }
-}
-/** The travelling-wind bed: seeded brown-ish noise through a 420 Hz lowpass,
- * a seamless 3 s loop (the browser build's looped buffer, gain 0.5). */
-function bedClip(themeKey: string): AudioClip {
-  const rate = 8000;
-  const n = 3 * rate, fade = Math.round(0.25 * rate);
-  const raw = new Float32Array(n + fade);
-  const rng = createRng(hashSeed(`ambience:${themeKey}`));
-  let last = 0;
-  for (let i = 0; i < raw.length; i++) {
-    last = last * 0.98 + (rng.next() * 2 - 1) * 0.02;
-    raw[i] = last * 6;
-  }
-  // 420 Hz at 8 kHz (the filter's own rate).
-  const w = 2 * Math.PI * 420 / rate, alpha = Math.sin(w) / (2 * 0.707), c = Math.cos(w), a0 = 1 + alpha;
-  const b0 = (1 - c) / 2 / a0, b1 = (1 - c) / a0, a1 = -2 * c / a0, a2 = (1 - alpha) / a0;
-  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
-  for (let i = 0; i < raw.length; i++) {
-    const x0 = raw[i]!, y0 = b0 * x0 + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2;
-    x2 = x1; x1 = x0; y2 = y1; y1 = y0; raw[i] = Math.max(-1, Math.min(1, y0 * 0.5));
-  }
-  const out = raw.slice(0, n);
-  for (let i = 0; i < fade; i++) { const k = i / fade; out[i] = raw[n + i]! * (1 - k) + raw[i]! * k; }
-  return createClip([out], rate);
+/** The travelling-wind bed: seeded brown noise through a 420 Hz lowpass, a seamless 3 s
+ * loop (the noise repeats every 3 s, so once the filter settled so does its output). */
+async function renderBed(themeKey: string): Promise<AudioClip> {
+  const n = 3 * RATE, settle = Math.round(0.25 * RATE);
+  const off = new OfflineAudioContext(1, settle + n, RATE);
+  const noise = off.createNoise({ color: "brown", seed: hashSeed(`ambience:${themeKey}`), seconds: 3 });
+  const lp = off.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 420;
+  const g = off.createGain(); g.gain.value = BED_MAKEUP;
+  noise.connect(lp).connect(g).connect(off.destination); noise.start();
+  const r = await off.startRendering();
+  return createClip([r.getChannelData(0).slice(settle)], RATE);
 }
 /** One pad step: each chord tone as a 3.6 s sine (0.05) and its 2.01×
- * triangle a 50 ms later (2.4 s, 0.02), exponential decays as the browser
- * build's blips. */
-function chordClip(freqs: number[]): AudioClip {
-  const n = Math.round(3.7 * RATE);
-  const out = new Float32Array(n);
-  const k1 = Math.pow(0.0001 / 0.05, 1 / (3.6 * RATE)), k2 = Math.pow(0.0001 / 0.02, 1 / (2.4 * RATE));
-  const lag = Math.round(0.05 * RATE), end1 = Math.round(3.6 * RATE), end2 = lag + Math.round(2.4 * RATE);
-  for (const f of freqs) {
-    const w = 2 * Math.PI * f / RATE, step2 = f * 2.01 / RATE;
-    let e1 = 0.05, e2 = 0.02, ph = 0;
-    for (let i = 0; i < n; i++) {
-      if (i < end1) { out[i]! += Math.sin(w * i) * e1; e1 *= k1; }
-      if (i >= lag && i < end2) { out[i]! += (1 - 4 * Math.abs(ph - 0.5)) * e2; e2 *= k2; ph += step2; if (ph >= 1) ph -= 1; }
-    }
-  }
-  lowpass(out, 3000, 0.707);
-  return createClip([out], RATE);
+ * triangle 50 ms later (2.4 s, 0.02), exponential decays, through a 3 kHz lowpass. */
+async function renderChord(freqs: number[]): Promise<AudioClip> {
+  const off = new OfflineAudioContext(1, Math.round(3.7 * RATE), RATE);
+  const lp = off.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3000;
+  lp.connect(off.destination);
+  const voice = (type: "sine" | "triangle", freq: number, level: number, start: number, end: number): void => {
+    const osc = off.createOscillator(); osc.type = type; osc.frequency.value = freq;
+    const g = off.createGain();
+    g.gain.setValueAtTime(level, start); g.gain.exponentialRampToValueAtTime(0.0001, end);
+    osc.connect(g).connect(lp); osc.start(start); osc.stop(end);
+  };
+  for (const f of freqs) { voice("sine", f, 0.05, 0, 3.6); voice("triangle", f * 2.01, 0.02, 0.05, 2.45); }
+  return createClip(await off.startRendering());
 }
 
 const CHORDS = [
@@ -125,29 +95,29 @@ export function stopAmbience(): void {
 // The pad: a seeded root and progression per table, a chord every 3.4 s.
 let music: { seed: number; root: number; rng: ReturnType<typeof createRng>; step: number; timer: number } | null = null;
 const chordCache = new Map<string, AudioClip>();
-const chordQueue: string[] = [];
+const chordAsked = new Set<string>();
+let chordRenders: Promise<unknown> = Promise.resolve();
+/** Renders a chord unless it is cached or on its way, one at a time. */
+function askChord(root: number, c: number, oct: number): void {
+  const key = `${root.toFixed(3)}:${c}:${oct}`;
+  if (chordAsked.has(key)) return;
+  chordAsked.add(key);
+  chordRenders = chordRenders
+    .then(() => renderChord(CHORDS[c]!.map((iv) => root * oct * Math.pow(2, iv / 12))))
+    .then((clip) => { chordCache.set(key, clip); }, (e: unknown) => console.warn(`music: ${String(e)}`));
+}
 export function startMusic(seed: number): void {
   stopMusic();
   const rng = createRng(hashSeed(`music:${seed >>> 0}`));
   const root = 110 * Math.pow(2, rng.int(5) / 12);
   music = { seed, root, rng, step: 0, timer: 0 };
-  // Queue the progression's clips (both octaves), rendered one a frame.
-  for (let c = 0; c < CHORDS.length; c++) for (const oct of [1, 2]) chordQueue.push(`${root.toFixed(3)}:${c}:${oct}`);
+  for (let c = 0; c < CHORDS.length; c++) for (const oct of [1, 2]) askChord(root, c, oct);
   tick();
   music.timer = setInterval(tick, 3400);
 }
 export function stopMusic(): void {
   if (music) clearInterval(music.timer);
   music = null;
-}
-function chordFor(key: string): AudioClip | null {
-  const hit = chordCache.get(key);
-  if (hit) return hit;
-  if (context.state !== "running") return null;
-  const [root, c, oct] = key.split(":").map(Number) as [number, number, number];
-  const clip = chordClip(CHORDS[c]!.map((iv) => root * oct * Math.pow(2, iv / 12)));
-  chordCache.set(key, clip);
-  return clip;
 }
 function tick(): void {
   if (!music) return;
@@ -156,19 +126,21 @@ function tick(): void {
   const oct = m.step % 4 === 3 ? 2 : 1;
   m.step++;
   const clip = chordCache.get(`${m.root.toFixed(3)}:${c}:${oct}`);
-  if (clip) try { playClip(clip, { bus: "music", gain: MUSIC }); } catch { /* the mixer is full */ }
+  if (clip && context.state === "running") try { playClip(clip, { bus: "music", gain: MUSIC }); } catch { /* the mixer is full */ }
 }
 
-/** Called each frame: starts what waited for the mixer, renders one pending clip. */
+/** Called each frame: starts the bed once the mixer runs and its clip is rendered. */
 export function poll(): void {
-  if (context.state !== "running") return; // starting the bed still waits for the mixer
-  if (wantBed && (!bed || bed.theme !== wantBed || !bed.sound)) {
-    try {
-      if (!bed || bed.theme !== wantBed) { try { bed?.sound?.stop(); } catch { /* gone */ } bed = { theme: wantBed, sound: null, clip: bedClip(wantBed) }; return; }
-      bed.sound = playClip(bed.clip!, { bus: "music", loop: true, gain: 0.5 * AMBIENCE });
-    } catch (e) { console.warn(`ambience: ${String(e)}`); wantBed = null; }
+  if (context.state !== "running" || !wantBed) return;
+  if (!bed || bed.theme !== wantBed) {
+    try { bed?.sound?.stop(); } catch { /* gone */ }
+    const b: NonNullable<typeof bed> = { theme: wantBed, sound: null, clip: null };
+    bed = b;
+    renderBed(b.theme).then((clip) => { b.clip = clip; }, (e: unknown) => { console.warn(`ambience: ${String(e)}`); if (bed === b) wantBed = null; });
     return;
   }
-  const next = chordQueue.shift();
-  if (next) chordFor(next);
+  if (bed.clip && !bed.sound) {
+    try { bed.sound = playClip(bed.clip, { bus: "music", loop: true, gain: 0.5 * AMBIENCE }); }
+    catch (e) { console.warn(`ambience: ${String(e)}`); wantBed = null; }
+  }
 }

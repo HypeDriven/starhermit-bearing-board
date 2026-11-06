@@ -1,54 +1,22 @@
-// Localization: js/strings.js (the nine StarHermit locales) in the interface
-// language the runtime reports (preferences().language: the player's choice
-// in Options › Language, else the device's). The browser build's own
-// Language selector, its ?lang= override and the account's preferred-language
-// lookup are the runtime's now. A change re-renders everything next frame
-// (the UI is immediate mode); listeners hear it for what is cached.
-import { onPreferencesChange, preferences } from "starhermit:engine";
+// Localization: assets/strings.json (the nine StarHermit locales) on the
+// engine's string tables, in the interface language the runtime reports
+// (Options › Language, else the device's); account lines are the engine's
+// `starhermit.*`. The UI is immediate mode, so a change shows next frame.
+import { strings } from "starhermit:engine";
 import * as ui from "starhermit:ui";
-import { LOCALES, STRINGS } from "../js/strings.js";
 
-type Table = Record<string, string>;
-const TABLES = STRINGS as unknown as Record<string, Table>;
-const PRIMARY: Record<string, string> = { en: "en-US", es: "es-419", de: "de-DE", fr: "fr-FR", pt: "pt-BR", it: "it-IT" };
+strings.load("assets/strings.json");
+strings.defaultLocale = "en-US";
+ui.setLanguage(strings.locale);
+strings.onChange((locale) => ui.setLanguage(locale));
 
-/** The shipped locale nearest a BCP 47 tag (the browser build's mapping:
- * es-MX → es-419, en-AU → en-GB, fr → fr-FR, pt-PT → pt-BR). */
-export function pickLocale(tag: string): string {
-  const t = String(tag || "en-US");
-  const exact = LOCALES.find((l) => l.toLowerCase() === t.toLowerCase());
-  if (exact) return exact;
-  const lang = t.split(/[-_]/)[0]!.toLowerCase();
-  if (lang === "en" && /-(gb|ie|au|nz|za|in)$/i.test(t)) return "en-GB";
-  if (lang === "es" && /-es$/i.test(t)) return "es-ES";
-  if (lang === "fr" && /-ca$/i.test(t)) return "fr-CA";
-  return PRIMARY[lang] ?? "en-US";
-}
-
-let locale = pickLocale(preferences().language);
-export function currentLocale(): string { return locale; }
-const listeners = new Set<() => void>();
-/** fn() after the interface language changed. */
-export function onLanguage(fn: () => void): void { listeners.add(fn); }
-function apply(): void {
-  ui.setLanguage(locale);
-  for (const fn of listeners) fn();
-}
-onPreferencesChange((p) => {
-  const next = pickLocale(p.language);
-  if (next === locale) return;
-  locale = next;
-  apply();
-});
-apply();
-
+export function currentLocale(): string { return strings.locale; }
 export type Vars = Record<string, string | number> | null | undefined;
-/** A string by key in the player's language (then en-US, then `fallback`,
- * then the key), `{name}` placeholders filled from vars. */
+/** A string by key in the player's language (then its chain to en-US, then
+ * `fallback`), `{name}` placeholders filled from vars. */
 export function t(key: string, vars?: Vars, fallback?: string): string {
-  let s = TABLES[locale]?.[key] ?? TABLES["en-US"]![key] ?? fallback ?? key;
-  if (vars) s = s.replace(/\{(\w+)\}/g, (m, k: string) => (vars[k] != null ? String(vars[k]) : m));
-  return s;
+  if (fallback !== undefined && !strings.has(key)) return fallback;
+  return strings.t(key, vars ?? undefined);
 }
 
 /** Trusted markup (`*.html` strings) as plain text: tags dropped, the

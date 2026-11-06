@@ -36,10 +36,8 @@ function later(fn: () => void): void { queueMicrotask(fn); }
 // ------------------------------------------------------------------ layout
 interface Layout { lw: number; lh: number; sc: number; mode: "desktop" | "tablet" | "portrait" | "short"; railW: number }
 function layoutNow(): Layout {
-  const f = frame();
-  const sc = ui.preferences().scale;
-  const sa = f.safeArea;
-  const lw = (f.width - sa.left - sa.right) / sc, lh = (f.height - sa.top - sa.bottom) / sc;
+  const v = ui.viewport!();
+  const lw = Math.max(1, v.width), lh = Math.max(1, v.height), sc = v.scale;
   const short = lh <= 500 && lw > lh;
   const mode = short ? "short" : lw >= 1024 ? "desktop" : lw >= 768 ? "tablet" : "portrait";
   return { lw, lh, sc, mode, railW: mode === "desktop" ? 240 : mode === "tablet" ? 200 : 176 };
@@ -99,12 +97,6 @@ export function drawScreens(): void {
     const f = frame();
     if (f.width > 2 && f.height > 2) render.frameBoard({ x: 0, y: 0, w: f.width, h: f.height }, f.width, f.height);
     drawPage(L);
-  }
-  if (app.toast) {
-    const top = 64;
-    ui.place("toast", { anchor: "top", x: 0, y: top }, () => {
-      ui.style("toast").paragraph(app.toast!.text, Math.min(34 * 16, L.lw * 0.92) - 34);
-    });
   }
 }
 
@@ -431,8 +423,8 @@ function titleScreen(L: Layout): void {
     items.push({ label: t("m.practice"), id: "m-practice", fn: () => go("setup") });
     items.push({ label: t("m.settings"), id: "m-settings", fn: () => openFromTitle("settings") });
     items.push({ label: t("m.help"), id: "m-help", fn: () => openFromTitle("help") });
-    if (platform.signedIn() && platform.inviteLink()) items.push({ label: t("acc.invite"), id: "m-invite", fn: copyInvite });
-    if (!platform.signedIn()) items.push({ label: t("acc.signIn"), id: "m-sign-in", fn: () => { void requestSignIn().catch(() => undefined); } });
+    if (platform.signedIn() && platform.inviteLink()) items.push({ label: t("starhermit.invite"), id: "m-invite", fn: copyInvite });
+    if (!platform.signedIn()) items.push({ label: t("starhermit.signIn"), id: "m-sign-in", fn: () => { void requestSignIn().catch(() => undefined); } });
     // Two columns where the window is wide but short (the browser build's menu was one column of 24rem).
     const cols = L.lw >= 640 && L.lh < 760 ? 2 : 1;
     const menuW = Math.min(inner, cols === 2 ? 608 : 384);
@@ -595,7 +587,7 @@ function resultsScreen(L: Layout): void {
       ui.style("tagline").paragraph(t("res.versions", { seed: state.cfg.seed, r: Rules.RULES_VERSION, c: Content.CONTENT_VERSION }), w);
       if (btn(t("res.copyReplay"), "r-replay")) copyReplay();
     });
-    const lb = s.lbPost ? (!s.lbResult ? t("acc.lbPosting") : !s.lbResult.posted ? t("acc.lbNotPosted") : s.lbResult.rank ? t("acc.lbRank", { rank: s.lbResult.rank ?? 0 }) : t("acc.lbPosted")) : null;
+    const lb = s.lbPost ? (!s.lbResult ? t("starhermit.leaderboardPosting") : !s.lbResult.posted ? t("starhermit.leaderboardNotPosted") : s.lbResult.rank ? t("starhermit.leaderboardRank", { rank: s.lbResult.rank ?? 0 }) : t("starhermit.leaderboardPosted")) : null;
     if (lb) ui.style("tagline-center").paragraph(lb, inner);
   }, (inner) => {
     ui.row("results-actions", () => {

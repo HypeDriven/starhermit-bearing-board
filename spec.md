@@ -32,7 +32,7 @@ File map (everything that ships or is run):
 | `js/ai.js` | Practice AI (casual / steady / sharp) and the hint generator, over the same legal-move API |
 | `js/content.js` | Versioned content: 6 lessons, 40 journey stages, 8 challenges, daily generator, practice factory, 5 themes, 9 achievements, mastery tiers, validators |
 | `js/progress.js`, `js/settings.js` | Progress document, conflict merge, browser-build cloud save reader; the game's options and the browser-build settings migration |
-| `js/strings.js`, `js/i18n-*.js`, `js/account-strings.js` | Every player-facing string in the nine locales |
+| `assets/strings.json` | Every player-facing string in the nine locales (the engine's `strings`; account lines are its `starhermit.*`) |
 | `assets/ui-style.json` | `tools/ui-style.css` converted by `starhermit css` (`npm run css`) |
 | `score-script.js` | StarHermit platform script (`server=`): range-checks a finished game's match points and posts them to the `high-score` leaderboard |
 | `server.js` | Local dev server (not packaged): static host plus same-origin `/api/v1` (time, authoritative sessions, replay) running the same `rules.js` |
@@ -232,7 +232,7 @@ This table is the source of `sfx/manifest.txt`; `sfx/manifest.json` carries the 
 
 ## 10. Localization
 
-Nine locales ship for all player-facing text: **en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT** (`js/strings.js`: the `js/i18n-*.js` tables, the platform lines as `acc.*`, and the strings the engine client added).
+Nine locales ship for all player-facing text: **en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT** (`assets/strings.json`, read by the engine's `strings`; platform lines are the engine's `starhermit.*`).
 
 - The locale follows the runtime's interface language (`preferences().language`: the player's choice in Options › Language, else the device's), mapped to the nearest shipped locale (`es-MX → es-419`, `en-AU → en-GB`, `fr → fr-FR`, `pt-PT → pt-BR`); a change re-renders everything on the next frame while a table, its AI timers and the scene go on. The browser build's own Language selector, `?lang=` and the account preferred-language lookup are the runtime's now.
 - Content keeps English data; names come by id (stages, chapters, lessons and every tutorial step, challenges, practice and daily names, themes, achievements, mastery titles, AI difficulties, rulesets). Help's trusted markup is shown as plain text with the key names kept.
@@ -253,7 +253,7 @@ Nine locales ship for all player-facing text: **en-US, en-GB, es-419, es-ES, de-
 - **Save:** the progress document is the game's save (`saves`), on the device and in the account's cloud slot; a conflict merges both devices' documents with `mergeProgress` (better journey record per stage, lessons, challenges, union of daily days, earliest unlock of every achievement, larger stats), and an account copy that replaced the device's is adopted (toast "Progress from another device was merged."). The browser build's cloud save (the JS SDK's zipped `save.json` `{ data, check }` in `game:<slug>`) shows as foreign: it is checked, merged into the device's progress and replaces the slot once (`replaceForeign`).
 - **Settings:** the game's options are `settings` (`game.<key>`, synced with the account). The browser build's per-player keys are read once (`settings.onLegacy`): theme, left-handed, haptics, tap-to-select, timing assistance and the traveller name migrate where unset; every legacy key (sound, graphics, frame-rate and language slots included) is then removed. The table in progress and the funnel stay on the device (`storage`).
 - **Controls:** the platform keeps the declared actions' bindings with the account (renamed `cameraReset` → `camera`; a rebinding of it starts from the default).
-- **Leaderboard:** signed in, every finished solo game except lessons posts seat 0's match points (0 for a loss) once through `score-script.js` (a practice session whose socket carries `{ type: 'result', scores: { 'high-score': n } }`), and the results screen shows "Leaderboard rank: #N" (or posted / not posted). Hot-seat games and guests post nothing.
+- **Leaderboard:** signed in, every finished solo game except lessons posts seat 0's match points (0 for a loss) once through `score-script.js` (`leaderboards.submitScore`), and the results screen shows "Leaderboard rank: #N" (or posted / not posted). Hot-seat games and guests post nothing.
 - **Reports and Options:** Report a problem, sound, graphics, language, controls and accessibility are the runtime's (F1 / the Settings button).
 - **Not used:** StarHermit achievements (unlocks stay in the save), sessions/matchmaking/chat/replays, `server.js`'s routes, avatars, presence, voice.
 

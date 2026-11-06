@@ -14,10 +14,9 @@
 // - the table in progress (Continue) and the anonymous funnel stay on the
 //   device (`storage`);
 // - a finished solo game's match points go to the high-score board through
-//   score-script.js: a practice session whose socket carries
-//   { type: 'result', scores }, as the JS SDK's submitScores did.
+//   score-script.js (leaderboards.submitScore).
 import type { JsonValue } from "starhermit:engine";
-import { connectGame, inviteLink as fetchInviteLink, leaderboards, onPlayerChange, player, sessions, type Leaderboard } from "starhermit:platform";
+import { inviteLink as fetchInviteLink, leaderboards, onPlayerChange, player } from "starhermit:platform";
 import { saves, settings, storage } from "starhermit:storage";
 import { DEFAULT_PROGRESS, fromBrowserSave, mergeProgress, normalizeProgress } from "../js/progress.js";
 import { DEFAULT_SETTINGS, cleanSetting, migrateLegacySetting } from "../js/settings.js";
@@ -147,52 +146,12 @@ function refreshInvite(): void {
 }
 /** The invite link, fetched ahead so a button press can copy it at once. */
 export function inviteLink(): string | null { return player() ? invite : null; }
-onPlayerChange(() => { refreshInvite(); board = null; });
+onPlayerChange(refreshInvite);
 
 // --- leaderboard -------------------------------------------------------------------------------
-let board: Leaderboard | null = null;
-async function highScoreBoard(): Promise<Leaderboard | null> {
-  if (board) return board;
-  const list = await leaderboards.list();
-  board = list.find((b) => b.key === "high-score") ?? null;
-  return board;
-}
-
 /** Posts a finished game's match points through score-script.js; whether it
  * was taken and the player's rank (null past the first 100). Never rejects. */
 export async function submitScore(points: number): Promise<{ posted: boolean; rank: number | null }> {
-  const me = player();
-  if (!me) return { posted: false, rank: null };
-  let accepted: string[] = [];
-  try {
-    const sessionId = await sessions.practice();
-    accepted = await new Promise<string[]>((resolve) => {
-      const socket = connectGame(sessionId);
-      let done = false;
-      const finish = (list: string[]): void => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        socket.close();
-        resolve(list);
-      };
-      const timer = setTimeout(() => finish([]), 15000);
-      socket.on("open", () => { socket.sendCommand({ type: "result", scores: { "high-score": points } }); });
-      socket.on("game", (data) => {
-        const d = data as { type?: string; accepted?: string[] } | null;
-        if (d && d.type === "result-ack") finish(Array.isArray(d.accepted) ? d.accepted : []);
-      });
-      socket.on("error", () => finish([]));
-      socket.on("stopped", () => finish([]));
-      socket.on("abandoned", () => finish([]));
-    });
-  } catch { return { posted: false, rank: null }; }
-  if (!accepted.includes("high-score")) return { posted: false, rank: null };
-  try {
-    const b = await highScoreBoard();
-    if (!b) return { posted: true, rank: null };
-    const page = await leaderboards.entries(b.id, { pageSize: 100 });
-    const mine = page.items.find((e) => e.userId === me.userId);
-    return { posted: true, rank: mine ? mine.rank : null };
-  } catch { return { posted: true, rank: null }; }
+  const r = await leaderboards.submitScore("high-score", points);
+  return { posted: r.accepted, rank: r.rank };
 }

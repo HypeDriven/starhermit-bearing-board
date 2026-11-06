@@ -2,8 +2,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { STRINGS, LOCALES } from '../js/strings.js';
 import * as Content from '../js/content.js';
+
+const STRINGS = JSON.parse(readFileSync(new URL('../assets/strings.json', import.meta.url), 'utf8'));
+const LOCALES = Object.keys(STRINGS);
 
 test('every player-facing string and content name exists in all nine locales', () => {
   assert.deepEqual(LOCALES, ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT']);
@@ -26,7 +28,7 @@ test('every player-facing string and content name exists in all nine locales', (
 test('every literal key the engine client asks for exists', () => {
   const src = readdirSync(new URL('../native/', import.meta.url)).filter((f) => f.endsWith('.ts'))
     .map((f) => readFileSync(new URL(`../native/${f}`, import.meta.url), 'utf8')).join('\n');
-  const used = new Set([...src.matchAll(/\bt\("([a-zA-Z0-9_.]+)"/g)].map((m) => m[1]));
+  const used = new Set([...src.matchAll(/\bt\("([a-zA-Z0-9_.]+)"/g)].map((m) => m[1]).filter((k) => !k.startsWith('starhermit.')));
   assert.ok(used.size > 100, `found ${used.size} keys`);
   for (const k of used) for (const loc of LOCALES) assert.ok(STRINGS[loc][k], `${loc}.${k}`);
 });
