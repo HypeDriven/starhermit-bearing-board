@@ -1,3 +1,5 @@
+// localization-runtime:attached
+import { setLocalizedStyles as __l10nStyles } from "./l10n/font.ts";
 // The look of the menus and HUD: the browser build's style sheet
 // (tools/ui-style.css, converted once with `starhermit css` into
 // assets/ui-style.json by `npm run css`) registered as starhermit:ui styles,
@@ -17,7 +19,7 @@ export function setStyle(): void {
   });
   const card = css.styles[".card"]!;
   const veil = css.styles[".veil"]!;
-  ui.setStyles({
+  __l10nStyles({
     ...css.styles,
     // A modal card: .bb-card's box over .bb-modal's dim.
     dialog: {

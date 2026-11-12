@@ -41,3 +41,7 @@ engine.gamepad.prev=DpadLeft+DpadUp
 engine.gamepad.next=DpadRight+DpadDown
 engine.gamepad.confirm=South
 engine.gamepad.cancel=East
+
+# Game language (saved per player); Automatic follows the account/device.
+control.localization=F2 | Language
+engine.group.localization=Interface
