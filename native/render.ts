@@ -28,6 +28,7 @@ import {
   PlaneGeometry, PointLight, Points, PointsMaterial, Quaternion, Raycaster, RepeatWrapping,
   RingGeometry, SRGBColorSpace, TorusGeometry, Vector2, Vector3, pointerToNdc, renderer, scene,
 } from "starhermit:scene";
+import { GPUParticleEmitter } from "starhermit:particles";
 import type { Material, Texture } from "starhermit:scene";
 import { OffscreenCanvas } from "starhermit:canvas";
 import * as Rules from "../js/rules.js";
@@ -750,19 +751,17 @@ export function setCursor(spot: Spot | null): void {
 }
 
 // --- particles and motes --------------------------------------------------------------------------
-interface Particle { life: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; r: number; g: number; b: number }
-let particles: { points: Points; mat: PointsMaterial; pos: Float32Array; col: Float32Array; data: Particle[]; cursor: number; idle: boolean } | null = null;
+let particles: { emitter: GPUParticleEmitter; mat: PointsMaterial } | null = null;
 function buildParticles(): void {
-  const geo = new BufferGeometry();
-  const pos = new Float32Array(PARTICLE_MAX * 3), col = new Float32Array(PARTICLE_MAX * 3);
-  for (let i = 0; i < PARTICLE_MAX; i++) pos[i * 3 + 1] = -99;
-  geo.setAttribute("position", new BufferAttribute(pos, 3));
-  geo.setAttribute("color", new BufferAttribute(col, 3));
-  const mat = new PointsMaterial({ size: 0.09, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false });
-  const points = new Points(geo, mat);
-  points.frustumCulled = false;
-  fxGroup.add(points);
-  particles = { points, mat, pos, col, data: Array.from({ length: PARTICLE_MAX }, () => ({ life: 0, x: 0, y: -99, z: 0, vx: 0, vy: 0, vz: 0, r: 1, g: 1, b: 1 })), cursor: 0, idle: true };
+  const mat = new PointsMaterial({ size: 0.09, transparent: true, opacity: 0.95, depthWrite: false });
+  const emitter = new GPUParticleEmitter({
+    capacity: PARTICLE_MAX, material: mat, space: "world", life: [0.55, 0.95],
+    velocity: [0, 2.6, 0], velocitySpread: [3.4, 1, 3.4], gravity: [0, -6.5, 0], opacity: [0.95, 0],
+    floor: { height: 0.03, response: "bounce", restitution: 0.35, friction: 0.3 },
+  });
+  emitter.frustumCulled = false;
+  fxGroup.add(emitter);
+  particles = { emitter, mat };
 }
 let fxSeed = 1;
 function burst(x: number, y: number, z: number, color: number, n: number): void {
@@ -770,46 +769,8 @@ function burst(x: number, y: number, z: number, color: number, n: number): void 
   if (look.particles === "low") n = Math.ceil(n / 2);
   const B = look.budget;
   n = Math.max(1, Math.min(B.particles, Math.round(n * B.burst)));
-  const c = hex(color);
-  particles.idle = false;
-  const rng = Rules.createRng(Rules.hashSeed(`fx:${x}:${z}:${fxSeed++}`));
-  for (let i = 0; i < n; i++) {
-    const p = particles.data[particles.cursor]!;
-    particles.cursor = (particles.cursor + 1) % Math.min(PARTICLE_MAX, B.particles);
-    const a = rng.next() * PI * 2;
-    const sp = 1.2 + rng.next() * 2.2;
-    p.life = 0.55 + rng.next() * 0.4;
-    p.x = x; p.y = y; p.z = z;
-    p.vx = Math.cos(a) * sp; p.vz = Math.sin(a) * sp; p.vy = 1.6 + rng.next() * 2.0;
-    p.r = c.r; p.g = c.g; p.b = c.b;
-  }
-}
-function updateParticles(dt: number): void {
-  if (!particles || particles.idle) return; // stays in script: sparks bounce off the board
-  const { pos, col } = particles;
-  let any = false;
-  particles.data.forEach((p, i) => {
-    if (p.life > 0) {
-      any = true;
-      p.life -= dt;
-      p.vy -= 6.5 * dt;
-      p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-      if (p.y < 0.03) { p.y = 0.03; p.vy *= -0.35; p.vx *= 0.7; p.vz *= 0.7; }
-      const fade = Math.max(0, Math.min(1, p.life * 2));
-      pos[i * 3] = p.x; pos[i * 3 + 1] = p.life > 0 ? p.y : -99; pos[i * 3 + 2] = p.z;
-      col[i * 3] = p.r * fade; col[i * 3 + 1] = p.g * fade; col[i * 3 + 2] = p.b * fade;
-    } else if (pos[i * 3 + 1]! > -50) {
-      pos[i * 3 + 1] = -99;
-      any = true;
-    }
-  });
-  if (any) {
-    const g = particles.points.geometry;
-    (g.getAttribute("position") as BufferAttribute).array = pos;
-    g.getAttribute("position")!.needsUpdate = true;
-    (g.getAttribute("color") as BufferAttribute).array = col;
-    g.getAttribute("color")!.needsUpdate = true;
-  } else particles.idle = true;
+  particles.emitter.set({ seed: Rules.hashSeed(`fx:${x}:${z}:${fxSeed++}`) });
+  particles.emitter.burst(n, [x, y, z], { color: hex(color) });
 }
 
 let motes: { points: Points; pos: Float32Array; seeds: { x: number; y: number; z: number; p: number; s: number }[] } | null = null;
@@ -1012,7 +973,7 @@ export function update(dtRaw: number): void {
     camera.position.y += (Math.random() - 0.5) * shakeAmp * 0.6;
     shakeAmp *= Math.pow(0.001, dt * 2.2);
   } else shakeAmp = 0;
-  updateParticles(dt);
+  if (particles) particles.emitter.paused = reducedMotion;
   // Ambient motion: lantern flicker and drifting motes; frozen with reduced motion.
   const animated = look.animated && !reducedMotion;
   if (animated) {

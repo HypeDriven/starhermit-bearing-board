@@ -11,7 +11,7 @@
 | Genre | Turn-based race board game (original rules family, two rulesets) |
 | Players | 1 human vs 1–3 deterministic AI rivals; 2-human pass-and-play on one device (practice only) |
 | Session length | Practice duel 10–20 min; lessons 1–3 min; endgame stages 3–6 min; four-caravan circuits up to 25 min |
-| Platforms | StarHermit engine 1.39.0 script game (host API 1.39): natively in the StarHermit client and in desktop and mobile browsers through the engine's web runtime; portrait and landscape |
+| Platforms | StarHermit engine 1.44.1 script game (host API 1.44): natively in the StarHermit client and in desktop and mobile browsers through the engine's web runtime; portrait and landscape |
 | Rendering | `starhermit:scene` (three.js-like) perspective scene, all geometry procedural, the engine's post effects; the HUD and screens in `starhermit:ui` over it |
 | Offline | Fully playable without any server; a guest makes no platform call. The daily's UTC day is the device's clock |
 
@@ -19,7 +19,7 @@ File map (everything that ships or is run):
 
 | Path | Responsibility |
 |---|---|
-| `starhermit.txt` | Manifest: name, description, owner, `server=score-script.js`, cover, `launch=index.html`, `engine.*` (api 1, entry `native/main.ts`, version 1.39.0, minor 32, capabilities platform, storage, clipboard), `control.*` keys and `engine.gamepad.*` pads |
+| `starhermit.txt` | Manifest: name, description, owner, `server=score-script.js`, cover, `launch=index.html`, `engine.*` (api 1, entry `native/main.ts`, version 1.44.1, minor 32, capabilities platform, storage, clipboard), `control.*` keys and `engine.gamepad.*` pads |
 | `index.html`, `starhermit-files.json` | The engine's web loader and file index, written by `npm run package` (`starhermit package --web .`); never edited |
 | `native/main.ts` | Entry module: session controller (`Session`), goals, stars, achievements, app phases, commands, selection, the board cursor, pause / leave / restart, results, input (actions, pointer, touch) |
 | `native/screens.ts` | HUD, rails, tray, lesson card, stakes and pause dialogs, toasts and the full-window screens in `starhermit:ui`; layouts by window size; frames the board in what the HUD leaves |
@@ -183,7 +183,7 @@ High-contrast mode swaps the UI tokens to pure black / white / `#ffdf4d`. The hu
 
 **Typography.** System UI stack (`system-ui, -apple-system, Segoe UI, Roboto`), title in accent brass with 0.06em tracking, rail titles uppercase 0.78em with 0.14em tracking, key names in the bindings line; the runtime's text size scales everything.
 
-**Motion.** Markers slide from origin to slot in 320 ms ease-out-cubic; selection rings pulse at 4 rad/s; hits shake the camera at 0.06, game over at 0.1, decaying critically; particles are a 240-slot pool (hit 26, bear-off 12, game over 140). `Skip Anim` and any state change settle everything to the exact rules position. With reduced motion (the runtime's accessibility preference): no intro swoop, no shake, no particles, no slide tweens, AI delay 180 ms, results after 250 ms instead of 1100 ms.
+**Motion.** Markers slide from origin to slot in 320 ms ease-out-cubic; selection rings pulse at 4 rad/s; hits shake the camera at 0.06, game over at 0.1, decaying critically; sparks use a bounded native GPU particle emitter with automatic CPU fallback and a native board collider (hit 26, bear-off 12, game over 140). `Skip Anim` and any state change settle everything to the exact rules position. With reduced motion (the runtime's accessibility preference): no intro swoop, no shake, no particles, no slide tweens, AI delay 180 ms, results after 250 ms instead of 1100 ms.
 
 **Visual assets the design calls for.** Title key art (leather board under lantern light), a victory illustration (full off-tray, brass cube), a "road goes on" illustration (board folding at dusk), and a store cover derived from the key art. All four ship (see §15).
 
@@ -318,3 +318,9 @@ QA bar: a new player reaches a rolling table in one click; every feature in §5�
 The string tables include complete regional variants for `fr-BE`, `en-SG`, `en-HK`, `en-BQ`, `es-CO`, `fr-IT`, `es-CL`, `es-AR`, `es-EC`, `de-BE`, `de-IT`, `de-BR`. These reuse the corresponding existing translations in their language family. The runtime can resolve the exact regional tag. Language selection is available from the game’s Options panel or F2 and is saved per player in `ui.language`. Changes apply during play. Additional national, regional and indigenous language packs are only shipped once every English message has a translation with intact placeholders and markup. Complete additional language tables: `nl-BE`, `zh-SG`, `nl-NL`, `id-ID`, `ja-JP`, `ms-SG`, `zh-HK`, `yue-HK`, `fi-FI`, `sv-FI`, `et-EE`, `vi-VN`, `ta-SG`, `ru-FI`, `ru-EE`, `da-DE`, `lb-BE`, `co-FR`, `eu-FR`, `ca-FR`, `oc-FR`, `sl-IT`, `fur-IT`, `ca-IT`, `oc-IT`, `ca-ES`, `eu-ES`, `gl-ES`, `su-ID`, `bew-ID`, `km-VN`.
 
 <!-- regional-localization:end -->
+
+## Engine 1.44.1
+
+Browser play uses the WebGPU-only StarHermit 1.44.1 web runtime. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
+
+The help screen replays through retained native UI while its contents, options, layout and key bindings are unchanged.

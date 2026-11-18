@@ -1,3 +1,4 @@
+import { bindings } from "starhermit:input";
 import { localizedStyle as __l10nStyle } from "./l10n/font.ts";
 import { localizedDrawOptions as __l10nDrawOptions } from "./l10n/font.ts";
 // localization-runtime:attached
@@ -106,7 +107,7 @@ function card(key: string, title: string, L: Layout, build: (inner: number) => v
 function closedCards(keep: string[]): void { for (const k of [...openedAt.keys()]) if (!keep.includes(k)) openedAt.delete(k); }
 
 // ------------------------------------------------------------------ entry
-export function drawScreens(): void {
+function drawScreensImmediate(): void {
   const L = layoutNow();
   if (app.phase === "game" && app.session) drawGame(L);
   else {
@@ -703,3 +704,10 @@ function helpScreen(L: Layout): void {
   }, (inner) => ui.row("h-done-row", () => { if (btn(t("btn.done"), "h-back", ["btn-primary"])) closeSubscreen(); }, { width: inner, justify: "center" }));
 }
 
+
+export function drawScreens(): void {
+  if (app.phase !== "help") { drawScreensImmediate(); return; }
+  const actions = ["roll","undo","hint","pause","camera","prev","next","confirm","cancel"];
+  const version = JSON.stringify([(app as any).settings ?? (app as any).options ?? {}, (platform as any).options ?? {}, actions.map((action) => bindings(action))]);
+  ui.retain!("help-screen", version, drawScreensImmediate);
+}
