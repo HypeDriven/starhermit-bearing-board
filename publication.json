@@ -12,7 +12,7 @@
     "metadataSource": "starhermit.txt",
     "createdAt": "2026-09-01T07:00:58.115605+00:00",
     "coverArtSource": "manifest",
-    "coverArtUpdatedAt": "2026-11-18T16:45:02.723422+00:00",
+    "coverArtUpdatedAt": "2026-11-22T14:19:43.940328+00:00",
     "submittedByUserId": "2712e04e-461b-4d23-81ae-e40b429128a8",
     "submittedByUsername": "starhermit",
     "hosting": {
@@ -22,9 +22,9 @@
       "pinnedCommitSha": null,
       "deployedCommitSha": null,
       "deployError": null,
-      "deployedAt": "2026-11-18T16:45:02.70965+00:00",
+      "deployedAt": "2026-11-22T14:19:43.927801+00:00",
       "externalLaunchUrl": null,
-      "engineVersion": "1.44.1",
+      "engineVersion": "1.47.0",
       "deployWarning": null
     },
     "description": "Roll dice, capture rival markers, and race to bear all your pieces off a classic backgammon-style board.",
@@ -36,19 +36,19 @@
     "links": [],
     "isDisabled": false
   },
-  "publishedAt": "2026-11-18T16:45:02.701Z",
-  "sourceCommit": "9d9feb682cd77ffc9f725d29ea8dc20297e126ab",
-  "bytesReceived": 3687541,
-  "archiveSha256": "3638b89551a398c4b1fbb22953d9c0a4b4a3e77c9acffbbee4b4ae7b4dcaa120",
+  "publishedAt": "2026-11-22T14:19:44.285Z",
+  "sourceCommit": "09a161d68b8a413ef34669f3f30e1110fe73a370",
+  "bytesReceived": 3687966,
+  "archiveSha256": "6795d69d5b743fce8ea01703d9f94c878ede595d8c3de6dd68e0c0d2f848000b",
   "indexSha256": "7f8a271d1bb967671da4c9ffb5976787b0b3a9b75d8200c12dee7cbd1550c6a6",
   "result": {
     "clientPublished": true,
     "serverImageLoaded": false,
     "imageDigest": null,
-    "bytesReceived": 3687541,
+    "bytesReceived": 3687966,
     "mode": "replace",
     "filesRemoved": 0,
-    "engineVersion": "1.44.1",
+    "engineVersion": "1.47.0",
     "deployWarning": null
   },
   "liveVerification": {
