@@ -1,4 +1,4 @@
-// Bearing Board — every client string in the nine StarHermit locales. Run: node --test
+// Bearing Board — every client string in the nine required locales and all shipped regional packs. Run: node --test
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -7,8 +7,8 @@ import * as Content from '../js/content.js';
 const STRINGS = JSON.parse(readFileSync(new URL('../assets/strings.json', import.meta.url), 'utf8'));
 const LOCALES = Object.keys(STRINGS);
 
-test('every player-facing string and content name exists in all nine locales', () => {
-  assert.deepEqual(LOCALES, ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT']);
+test('every player-facing string and content name exists in the required and regional locales', () => {
+  for (const loc of ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT']) assert.ok(LOCALES.includes(loc), loc);
   const keys = Object.keys(STRINGS['en-US']);
   for (const loc of LOCALES) {
     const T = STRINGS[loc];
