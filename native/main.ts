@@ -1,3 +1,4 @@
+import { showCursor as showMouseCursor } from "./cursor.ts";
 import { withLanguageRender as __l10nRender } from "./l10n/menu.ts";
 // Bearing Board on the StarHermit engine: the entry module (starhermit.txt
 // engine.entry), played natively by the StarHermit client and in browsers by
@@ -423,6 +424,7 @@ function applyLook(): void {
 }
 
 onStart(() => {
+  showMouseCursor();
   platform.initPlatform();
   app.settings = platform.loadSettings();
   setStyle();
