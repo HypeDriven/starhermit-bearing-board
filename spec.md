@@ -11,7 +11,7 @@
 | Genre | Turn-based race board game (original rules family, two rulesets) |
 | Players | 1 human vs 1–3 deterministic AI rivals; 2-human pass-and-play on one device (practice only) |
 | Session length | Practice duel 10–20 min; lessons 1–3 min; endgame stages 3–6 min; four-caravan circuits up to 25 min |
-| Platforms | StarHermit engine 1.52.0 script game (host API 1.52): natively in the StarHermit client and in desktop and mobile browsers through the engine's web runtime; portrait and landscape |
+| Platforms | StarHermit engine 1.53.0 script game (host API 1.53): natively in the StarHermit client and in desktop and mobile browsers through the engine's web runtime; portrait and landscape |
 | Rendering | `starhermit:scene` (three.js-like) perspective scene, all geometry procedural, the engine's post effects; the HUD and screens in `starhermit:ui` over it |
 | Offline | Fully playable without any server; a guest makes no platform call. The daily's UTC day is the device's clock |
 
@@ -19,7 +19,7 @@ File map (everything that ships or is run):
 
 | Path | Responsibility |
 |---|---|
-| `starhermit.txt` | Manifest: name, description, owner, `server=score-script.js`, cover, `launch=index.html`, `engine.*` (api 1, entry `native/main.ts`, version 1.52.0, minor 32, capabilities platform, storage, clipboard), `control.*` keys and `engine.gamepad.*` pads |
+| `starhermit.txt` | Manifest: name, description, owner, `server=score-script.js`, cover, `launch=index.html`, `engine.*` (api 1, entry `native/main.ts`, version 1.53.0, minor 32, capabilities platform, storage, clipboard), `control.*` keys and `engine.gamepad.*` pads |
 | `index.html`, `starhermit-files.json` | The engine's web loader and file index, written by `npm run package` (`starhermit package --web .`); never edited |
 | `native/main.ts` | Entry module: session controller (`Session`), goals, stars, achievements, app phases, commands, selection, the board cursor, pause / leave / restart, results, input (actions, pointer, touch) |
 | `native/screens.ts` | HUD, rails, tray, lesson card, stakes and pause dialogs, toasts and the full-window screens in `starhermit:ui`; layouts by window size; frames the board in what the HUD leaves |
@@ -319,12 +319,14 @@ The string tables include complete regional variants for `fr-BE`, `en-SG`, `en-H
 
 <!-- regional-localization:end -->
 
-## Engine 1.52.0
+## Engine 1.53.0
 
-Browser play uses the StarHermit 1.52.0 web runtime on WebGPU, or WebGL 2 where WebGPU is missing. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
+Browser play uses the StarHermit 1.53.0 web runtime on WebGPU, or WebGL 2 where WebGPU is missing. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
 
 The help screen replays through retained native UI while its contents, options, layout and key bindings are unchanged.
 
 Browser rendering uses the engine's asynchronous pipeline creation so newly encountered materials do not stall the page. Native play retains the engine's synchronous pipeline behavior.
 
 Higher graphics tiers use native per-object motion blur for moving pieces and effects. Camera motion stays sharp, lower tiers omit the effect, and the runtime's Motion blur and Reduce motion preferences remain authoritative.
+
+On engine 1.53.0, browser play through WebGL 2 compiles a frame's shader programs together and holds that frame until they are linked, blends skinned meshes in one pass, reuses the window pass's depth, and uses a hardware WebGL 2 context when WebGPU's adapter is software.
